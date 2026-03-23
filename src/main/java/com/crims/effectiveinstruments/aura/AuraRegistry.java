@@ -24,6 +24,9 @@ public final class AuraRegistry {
         loaded = true;
         EffectiveInstrumentsMod.LOGGER.info("Loaded {} aura presets ({} enabled)",
                 PRESETS.size(), ENABLED_IDS.size());
+
+        InstrumentAuraMapping.ensureDefaults();
+        InstrumentAuraMapping.load();
     }
 
     public static void reload() {

@@ -62,6 +62,14 @@ dependencies {
 
     // Even More Instruments - optional soft dependency (compile only so we don't crash if absent)
     compileOnly fg.deobf("evenmoreinstruments:evenmoreinstruments-1.20-${minecraft_version}:${evenmoreinstruments_version}")
+
+    // Testing
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
 }
 
 processResources {

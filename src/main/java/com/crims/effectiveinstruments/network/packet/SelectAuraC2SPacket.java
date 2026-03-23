@@ -4,6 +4,7 @@ import com.crims.effectiveinstruments.EffectiveInstrumentsMod;
 import com.crims.effectiveinstruments.aura.AuraManager;
 import com.crims.effectiveinstruments.aura.AuraPreset;
 import com.crims.effectiveinstruments.aura.AuraRegistry;
+import com.crims.effectiveinstruments.aura.InstrumentAuraMapping;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
@@ -44,6 +45,19 @@ public class SelectAuraC2SPacket {
                             "Player {} tried to select invalid/disabled aura: {}",
                             sender.getName().getString(), msg.auraId);
                     return;
+                }
+
+                // Validate the aura is allowed for the player's current instrument
+                AuraManager.PlayerAuraState state = AuraManager.getState(sender.getUUID());
+                if (state != null && state.getCurrentInstrumentId() != null) {
+                    InstrumentAuraMapping.InstrumentAuraConfig config =
+                            InstrumentAuraMapping.getConfig(state.getCurrentInstrumentId());
+                    if (config != null && !config.allowedAuraIds().contains(msg.auraId)) {
+                        EffectiveInstrumentsMod.LOGGER.debug(
+                                "Player {} tried to select aura '{}' not allowed for instrument '{}'",
+                                sender.getName().getString(), msg.auraId, state.getCurrentInstrumentId());
+                        return;
+                    }
                 }
 
                 // Clear old aura effects before switching

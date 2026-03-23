@@ -2,6 +2,8 @@ package com.crims.effectiveinstruments.aura;
 
 import com.crims.effectiveinstruments.EffectiveInstrumentsMod;
 import com.crims.effectiveinstruments.config.EIServerConfig;
+import com.crims.effectiveinstruments.network.EIPacketHandler;
+import com.crims.effectiveinstruments.network.packet.SyncAuraSelectionS2CPacket;
 import com.crims.effectiveinstruments.particle.AuraNoteParticleOptions;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -27,10 +29,22 @@ public class AuraManager {
     public static class PlayerAuraState {
         @Nullable
         AuraPreset selectedAura;
+        @Nullable
+        ResourceLocation currentInstrumentId;
         long lastNoteGameTime = -1;
         boolean instrumentOpen = false;
         // entity network ID -> set of effects we applied to that entity
         final Map<Integer, Set<MobEffect>> affectedTargets = new HashMap<>();
+
+        @Nullable
+        public AuraPreset getSelectedAura() { return selectedAura; }
+
+        @Nullable
+        public ResourceLocation getCurrentInstrumentId() { return currentInstrumentId; }
+
+        public boolean isInstrumentOpen() { return instrumentOpen; }
+
+        public int getAffectedTargetCount() { return affectedTargets.size(); }
 
         boolean isActive(long currentGameTime) {
             if (selectedAura == null || !instrumentOpen) return false;
@@ -56,12 +70,42 @@ public class AuraManager {
         state.lastNoteGameTime = player.level().getGameTime();
     }
 
+    /**
+     * Fallback open handler (no instrument ID). Called by InstrumentOpenStateChangedEvent.
+     * The real instrument-aware open is triggered by InstrumentOpenC2SPacket via onInstrumentOpenWithId().
+     */
     public static void onInstrumentOpen(Player player) {
         getOrCreate(player.getUUID()).instrumentOpen = true;
     }
 
+    public static void onInstrumentOpenWithId(ServerPlayer player, ResourceLocation instrumentId) {
+        PlayerAuraState state = getOrCreate(player.getUUID());
+        state.currentInstrumentId = instrumentId;
+        state.instrumentOpen = true;
+
+        // Auto-select default aura for this instrument
+        String defaultAuraId = InstrumentAuraMapping.getDefaultAuraId(instrumentId);
+        if (defaultAuraId != null) {
+            Optional<AuraPreset> preset = AuraRegistry.getById(defaultAuraId);
+            if (preset.isPresent() && preset.get().enabled()) {
+                onAuraSwitch(player);
+                setAuraSelection(player, preset.get());
+                EIPacketHandler.sendToPlayer(new SyncAuraSelectionS2CPacket(defaultAuraId), player);
+                return;
+            }
+        }
+        // No default — notify client
+        EIPacketHandler.sendToPlayer(new SyncAuraSelectionS2CPacket(""), player);
+    }
+
     public static void onInstrumentClose(Player player) {
-        getOrCreate(player.getUUID()).instrumentOpen = false;
+        PlayerAuraState state = getOrCreate(player.getUUID());
+        if (state.instrumentOpen && player instanceof ServerPlayer sp) {
+            onAuraSwitch(sp);
+            state.selectedAura = null;
+        }
+        state.instrumentOpen = false;
+        state.currentInstrumentId = null;
     }
 
     public static void onPlayerLogout(UUID playerId) {

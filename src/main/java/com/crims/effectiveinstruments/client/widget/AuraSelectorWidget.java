@@ -101,6 +101,12 @@ public class AuraSelectorWidget extends AbstractWidget {
         }
     }
 
+    public void setSelectedAuraId(@Nullable String auraId) {
+        for (AuraButtonWidget btn : buttons) {
+            btn.setSelected(btn.getPreset().id().equals(auraId));
+        }
+    }
+
     @Override
     public void renderWidget(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         for (AuraButtonWidget btn : buttons) {

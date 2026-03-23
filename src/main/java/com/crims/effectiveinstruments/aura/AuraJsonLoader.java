@@ -36,29 +36,69 @@ public final class AuraJsonLoader {
         try {
             Files.createDirectories(aurasDir);
 
-            writeDefaultJson(aurasDir, "soothing_hymn", "Soothing Hymn",
-                    "Regeneration I to nearby allies", "88FF88", 160, 0,
-                    new String[][]{{"minecraft:regeneration", "0"}},
-                    "effectiveinstruments:textures/gui/aura_soothing_hymn.png",
-                    "effectiveinstruments:textures/gui/aura_soothing_hymn_selected.png");
+            // --- Genshin Instruments auras ---
 
-            writeDefaultJson(aurasDir, "invigorating_march", "Invigorating March",
-                    "Speed I + Haste I to nearby allies", "FFAA00", 160, 1,
-                    new String[][]{{"minecraft:speed", "0"}, {"minecraft:haste", "0"}},
-                    "effectiveinstruments:textures/gui/aura_invigorating_march.png",
-                    "effectiveinstruments:textures/gui/aura_invigorating_march_selected.png");
+            writeDefaultJson(aurasDir, "zephyrs_blessing", "Zephyr's Blessing",
+                    "A gentle breeze quickens the step of nearby allies", "7FDBCA", 160, 0,
+                    new String[][]{{"minecraft:speed", "0"}});
 
-            writeDefaultJson(aurasDir, "guardian_chorus", "Guardian Chorus",
-                    "Resistance I + Absorption I to nearby allies", "4488FF", 160, 2,
-                    new String[][]{{"minecraft:resistance", "0"}, {"minecraft:absorption", "0"}},
-                    "effectiveinstruments:textures/gui/aura_guardian_chorus.png",
-                    "effectiveinstruments:textures/gui/aura_guardian_chorus_selected.png");
+            writeDefaultJson(aurasDir, "echoes_of_antiquity", "Echoes of Antiquity",
+                    "Ancient melodies mend the wounds of nearby allies", "D4A574", 160, 1,
+                    new String[][]{{"minecraft:regeneration", "0"}});
 
-            writeDefaultJson(aurasDir, "luminous_nocturne", "Luminous Nocturne",
-                    "Night Vision to nearby allies", "AAAAFF", 260, 3,
-                    new String[][]{{"minecraft:night_vision", "0"}},
-                    "effectiveinstruments:textures/gui/aura_luminous_nocturne.png",
-                    "effectiveinstruments:textures/gui/aura_luminous_nocturne_selected.png");
+            writeDefaultJson(aurasDir, "bloom_veil", "Bloom Veil",
+                    "Nourishes and shields nearby allies with floral energy", "FF88CC", 160, 2,
+                    new String[][]{{"minecraft:absorption", "0"}, {"minecraft:saturation", "0"}});
+
+            writeDefaultJson(aurasDir, "warcry_cadence", "Warcry Cadence",
+                    "Emboldens nearby allies with strength and resilience", "FF4422", 160, 3,
+                    new String[][]{{"minecraft:strength", "0"}, {"minecraft:resistance", "0"}});
+
+            writeDefaultJson(aurasDir, "moonlit_passage", "Moonlit Passage",
+                    "Grants night sight and safe descent to nearby allies", "6644BB", 260, 4,
+                    new String[][]{{"minecraft:night_vision", "0"}, {"minecraft:slow_falling", "0"}});
+
+            writeDefaultJson(aurasDir, "sunkissed_serenade", "Sunkissed Serenade",
+                    "Fortune favors nearby allies with improved luck", "FFDD44", 200, 5,
+                    new String[][]{{"minecraft:luck", "0"}});
+
+            writeDefaultJson(aurasDir, "rhythm_of_the_earth", "Rhythm of the Earth",
+                    "Primal beats hasten the hands and spring the step of nearby allies", "CC6633", 160, 6,
+                    new String[][]{{"minecraft:haste", "0"}, {"minecraft:jump_boost", "0"}});
+
+            // --- Even More Instruments auras ---
+
+            writeDefaultJson(aurasDir, "wanderers_anthem", "Wanderer's Anthem",
+                    "Quickens stride and lightens step for nearby allies", "B8860B", 160, 7,
+                    new String[][]{{"minecraft:speed", "0"}, {"minecraft:jump_boost", "0"}});
+
+            writeDefaultJson(aurasDir, "harmonic_resonance", "Harmonic Resonance",
+                    "Precise harmonies restore and energize nearby allies", "EEEEFF", 160, 8,
+                    new String[][]{{"minecraft:regeneration", "0"}, {"minecraft:haste", "0"}});
+
+            writeDefaultJson(aurasDir, "tranquil_current", "Tranquil Current",
+                    "Flowing tones grant water breathing and aquatic grace to nearby allies", "44AACC", 260, 9,
+                    new String[][]{{"minecraft:water_breathing", "0"}, {"minecraft:dolphins_grace", "0"}});
+
+            writeDefaultJson(aurasDir, "silk_road_vigor", "Silk Road Vigor",
+                    "Fierce melodies drive nearby allies to move and strike with vigor", "FF6644", 160, 10,
+                    new String[][]{{"minecraft:speed", "0"}, {"minecraft:strength", "0"}});
+
+            writeDefaultJson(aurasDir, "smoky_allure", "Smoky Allure",
+                    "Charismatic jazz melodies charm villagers into offering better trades", "DAA520", 200, 11,
+                    new String[][]{{"minecraft:hero_of_the_village", "0"}});
+
+            writeDefaultJson(aurasDir, "ghost_flame", "Ghost Flame",
+                    "Spectral fire shields from flame and emboldens nearby allies", "88CCFF", 200, 12,
+                    new String[][]{{"minecraft:fire_resistance", "0"}, {"minecraft:strength", "0"}});
+
+            writeDefaultJson(aurasDir, "bulwark_fanfare", "Bulwark Fanfare",
+                    "Triumphant brass fortifies and shields nearby allies", "CC8800", 160, 13,
+                    new String[][]{{"minecraft:resistance", "0"}, {"minecraft:absorption", "1"}});
+
+            writeDefaultJson(aurasDir, "heartstring_aria", "Heartstring Aria",
+                    "A soaring melody that heals and shields nearby allies", "CC4466", 200, 14,
+                    new String[][]{{"minecraft:regeneration", "0"}, {"minecraft:absorption", "0"}});
 
             writeReadme(aurasDir);
             Files.createFile(marker);
@@ -67,6 +107,12 @@ public final class AuraJsonLoader {
         } catch (IOException e) {
             EffectiveInstrumentsMod.LOGGER.error("Failed to generate default aura presets", e);
         }
+    }
+
+    private static void writeDefaultJson(Path dir, String id, String displayName, String description,
+                                          String color, int durationTicks, int sortOrder,
+                                          String[][] effects) throws IOException {
+        writeDefaultJson(dir, id, displayName, description, color, durationTicks, sortOrder, effects, null, null);
     }
 
     private static void writeDefaultJson(Path dir, String id, String displayName, String description,
@@ -89,8 +135,8 @@ public final class AuraJsonLoader {
             effectsArray.add(eff);
         }
         root.add("effects", effectsArray);
-        root.addProperty("icon", icon);
-        root.addProperty("iconSelected", iconSelected);
+        if (icon != null) root.addProperty("icon", icon);
+        if (iconSelected != null) root.addProperty("iconSelected", iconSelected);
 
         Files.writeString(dir.resolve(id + ".json"), GSON.toJson(root), StandardCharsets.UTF_8);
     }

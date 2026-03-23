@@ -29,3 +29,13 @@ Dependencies/
 # Runtime
 run/
 logs/
+
+# Stray build artifacts
+/META-INF/
+
+# Editor swap files
+*.swp
+*.kate-swp
+
+# External review documents
+UPDATE_*.md

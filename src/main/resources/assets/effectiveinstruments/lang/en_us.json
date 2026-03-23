@@ -1,6 +1,12 @@
 {
     "widget.effectiveinstruments.aura_selector": "Aura Selector",
-    "command.effectiveinstruments.reload.success": "Effective Instruments: Reloaded %s aura presets (%s enabled)",
+    "command.effectiveinstruments.reload.success": "Effective Instruments: Reloaded %s aura presets (%s enabled), %s instrument mappings",
+    "command.effectiveinstruments.status.header": "Effective Instruments — Player Status",
+    "command.effectiveinstruments.status.aura": "Selected Aura: %s",
+    "command.effectiveinstruments.status.instrument": "Current Instrument: %s",
+    "command.effectiveinstruments.status.active": "Instrument Open: %s",
+    "command.effectiveinstruments.status.targets": "Buffed Targets: %s",
+    "command.effectiveinstruments.status.none": "No aura state for this player",
     "narration.effectiveinstruments.aura_button": "%s — %s",
     "narration.effectiveinstruments.aura_button.selected": "%s — Selected — %s"
 }

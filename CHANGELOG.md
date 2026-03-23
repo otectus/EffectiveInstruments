@@ -2,6 +2,25 @@
 
 All notable changes to Effective Instruments will be documented in this file.
 
+## [1.2.0] - 2026-03-23
+
+### Features
+- **Instrument-specific auras:** Each instrument can have its own aura (or set of allowed auras) configured via `config/effective_instruments/instrument_auras.json`. The selector only shows auras allowed for the current instrument.
+- **Per-instrument aura memory:** Manual aura overrides are remembered per-instrument within the session (forgotten on logout)
+- **`/effectiveinstruments status [player]`** command to view aura state (selected aura, instrument, active status, buffed target count)
+- CI workflow for automated builds via GitHub Actions
+- Unit test scaffolding with JUnit 5
+
+### Changes
+- **Aura selection now clears when closing an instrument** (previously persisted across close/reopen). The instrument-specific default will auto-select on next open.
+- Network protocol bumped to version 3 (clients and servers must use matching mod versions)
+- `/effectiveinstruments reload` now also reloads instrument-aura mappings and reports mapping count
+
+### Technical
+- New `InstrumentOpenC2SPacket`: client sends instrument ID to server when opening an instrument screen
+- New `SyncAuraSelectionS2CPacket`: server syncs auto-selected aura back to client
+- `NoteActivityHandler` now captures instrument ID from note metadata as a fallback
+
 ## [1.1.0] - 2026-03-23
 
 ### Bug Fixes
