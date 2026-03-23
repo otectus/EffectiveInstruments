@@ -1,0 +1,6 @@
+{
+    "widget.effectiveinstruments.aura_selector": "Aura Selector",
+    "command.effectiveinstruments.reload.success": "Effective Instruments: Reloaded %s aura presets (%s enabled)",
+    "narration.effectiveinstruments.aura_button": "%s — %s",
+    "narration.effectiveinstruments.aura_button.selected": "%s — Selected — %s"
+}

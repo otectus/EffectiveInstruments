@@ -1,0 +1,31 @@
+# Gradle
+build/
+.gradle/
+gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+*.launch
+.metadata
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/
+
+# Dependencies (local jar files)
+Dependencies/
+
+# Windows shortcuts
+*.lnk
+
+# Runtime
+run/
+logs/
