@@ -33,6 +33,14 @@ public class SelectAuraC2SPacket {
             ServerPlayer sender = ctx.getSender();
             if (sender == null) return;
 
+            // Rate limit: 5 tick cooldown (~250ms) between selections
+            AuraManager.PlayerAuraState state = AuraManager.getState(sender.getUUID());
+            if (state != null) {
+                long now = sender.level().getGameTime();
+                if (now - state.getLastSelectionTick() < 5) return;
+                state.markSelectionTime(now);
+            }
+
             if (msg.auraId.isEmpty()) {
                 // Deselect — clear tracked targets, let effects expire naturally
                 AuraManager.onAuraSwitch(sender);
@@ -48,7 +56,6 @@ public class SelectAuraC2SPacket {
                 }
 
                 // Validate the aura is allowed for the player's current instrument
-                AuraManager.PlayerAuraState state = AuraManager.getState(sender.getUUID());
                 if (state != null && state.getCurrentInstrumentId() != null) {
                     InstrumentAuraMapping.InstrumentAuraConfig config =
                             InstrumentAuraMapping.getConfig(state.getCurrentInstrumentId());

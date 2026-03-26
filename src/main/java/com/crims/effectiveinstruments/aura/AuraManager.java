@@ -20,11 +20,13 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 public class AuraManager {
-    private static final Map<UUID, PlayerAuraState> PLAYER_STATES = new ConcurrentHashMap<>();
+    // All access occurs on the main server thread (tick handler, enqueueWork packet handlers, Forge events).
+    private static final Map<UUID, PlayerAuraState> PLAYER_STATES = new HashMap<>();
+    private static final Set<UUID> activeMusicians = new HashSet<>();
+    private static Set<ResourceLocation> cachedPetAllowlist = Set.of();
 
     public static class PlayerAuraState {
         @Nullable
@@ -32,6 +34,7 @@ public class AuraManager {
         @Nullable
         ResourceLocation currentInstrumentId;
         long lastNoteGameTime = -1;
+        long lastSelectionTick = -1;
         boolean instrumentOpen = false;
         // entity network ID -> set of effects we applied to that entity
         final Map<Integer, Set<MobEffect>> affectedTargets = new HashMap<>();
@@ -45,6 +48,10 @@ public class AuraManager {
         public boolean isInstrumentOpen() { return instrumentOpen; }
 
         public int getAffectedTargetCount() { return affectedTargets.size(); }
+
+        public long getLastSelectionTick() { return lastSelectionTick; }
+
+        public void markSelectionTime(long gameTick) { this.lastSelectionTick = gameTick; }
 
         boolean isActive(long currentGameTime) {
             if (selectedAura == null || !instrumentOpen) return false;
@@ -76,12 +83,14 @@ public class AuraManager {
      */
     public static void onInstrumentOpen(Player player) {
         getOrCreate(player.getUUID()).instrumentOpen = true;
+        activeMusicians.add(player.getUUID());
     }
 
     public static void onInstrumentOpenWithId(ServerPlayer player, ResourceLocation instrumentId) {
         PlayerAuraState state = getOrCreate(player.getUUID());
         state.currentInstrumentId = instrumentId;
         state.instrumentOpen = true;
+        activeMusicians.add(player.getUUID());
 
         // Auto-select default aura for this instrument
         String defaultAuraId = InstrumentAuraMapping.getDefaultAuraId(instrumentId);
@@ -102,13 +111,15 @@ public class AuraManager {
         PlayerAuraState state = getOrCreate(player.getUUID());
         if (state.instrumentOpen && player instanceof ServerPlayer sp) {
             onAuraSwitch(sp);
-            state.selectedAura = null;
+            clearAuraSelection(sp);
         }
         state.instrumentOpen = false;
         state.currentInstrumentId = null;
+        activeMusicians.remove(player.getUUID());
     }
 
     public static void onPlayerLogout(UUID playerId) {
+        activeMusicians.remove(playerId);
         PLAYER_STATES.remove(playerId);
     }
 
@@ -127,9 +138,14 @@ public class AuraManager {
 
         if (gameTime % interval != 0) return;
 
-        for (ServerPlayer player : level.players()) {
-            PlayerAuraState state = PLAYER_STATES.get(player.getUUID());
+        // Iterate only active musicians instead of all players in the level
+        for (UUID musicianId : List.copyOf(activeMusicians)) {
+            PlayerAuraState state = PLAYER_STATES.get(musicianId);
             if (state == null || !state.isActive(gameTime)) continue;
+
+            // Resolve player from this specific level; null if player is in a different dimension
+            ServerPlayer player = (ServerPlayer) level.getPlayerByUUID(musicianId);
+            if (player == null) continue;
 
             AuraPreset aura = state.selectedAura;
             if (aura == null) continue;
@@ -187,9 +203,7 @@ public class AuraManager {
 
         // Tamed pets
         if (EIServerConfig.INCLUDE_TAMED_PETS.get()) {
-            Set<ResourceLocation> extraPetTypes = EIServerConfig.PET_ENTITY_ALLOWLIST.get().stream()
-                    .map(ResourceLocation::new)
-                    .collect(Collectors.toSet());
+            Set<ResourceLocation> extraPetTypes = cachedPetAllowlist;
 
             for (Entity entity : source.serverLevel().getEntities(source, box)) {
                 if (!(entity instanceof LivingEntity living)) continue;
@@ -253,6 +267,9 @@ public class AuraManager {
         clearPreviousAuraEffects(player, state);
     }
 
+    // Note: When called after a dimension change, musician.serverLevel() returns the NEW dimension.
+    // Entity lookups for targets in the OLD dimension will return null, so those effects are not
+    // actively cleaned up. This is acceptable — effects expire naturally within 13 seconds (260 ticks max).
     private static void clearPreviousAuraEffects(ServerPlayer musician, PlayerAuraState state) {
         if (state.affectedTargets.isEmpty() || state.selectedAura == null) return;
 
@@ -265,6 +282,9 @@ public class AuraManager {
             ourEffects.put(entry.effect(), entry.amplifier());
         }
 
+        // Effects with much longer remaining duration than our aura's are likely from other sources
+        int maxExpectedDuration = oldAura.getEffectiveDuration() + EIServerConfig.AURA_TICK_INTERVAL.get() * 2;
+
         for (Map.Entry<Integer, Set<MobEffect>> entry : state.affectedTargets.entrySet()) {
             Entity entity = level.getEntity(entry.getKey());
             if (!(entity instanceof LivingEntity living)) continue;
@@ -276,8 +296,9 @@ public class AuraManager {
                 MobEffectInstance current = living.getEffect(effect);
                 if (current == null) continue;
 
-                // Only remove if the effect looks like ours: ambient + matching amplifier
-                if (current.isAmbient() && current.getAmplifier() == ourAmplifier) {
+                // Only remove if the effect looks like ours: ambient + matching amplifier + plausible duration
+                if (current.isAmbient() && current.getAmplifier() == ourAmplifier
+                        && current.getDuration() <= maxExpectedDuration) {
                     living.removeEffect(effect);
                 }
             }
@@ -308,6 +329,12 @@ public class AuraManager {
 
             level.sendParticles(options, px, py, pz, 1, 0, 0.02, 0, 0);
         }
+    }
+
+    public static void invalidatePetAllowlistCache() {
+        cachedPetAllowlist = EIServerConfig.PET_ENTITY_ALLOWLIST.get().stream()
+                .map(ResourceLocation::new)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     private static PlayerAuraState getOrCreate(UUID playerId) {

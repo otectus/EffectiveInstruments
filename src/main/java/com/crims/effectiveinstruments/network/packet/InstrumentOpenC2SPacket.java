@@ -1,5 +1,6 @@
 package com.crims.effectiveinstruments.network.packet;
 
+import com.crims.effectiveinstruments.EffectiveInstrumentsMod;
 import com.crims.effectiveinstruments.aura.AuraManager;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
@@ -28,6 +29,23 @@ public class InstrumentOpenC2SPacket {
         ctx.enqueueWork(() -> {
             ServerPlayer sender = ctx.getSender();
             if (sender == null) return;
+
+            // Rate limit: 5 tick cooldown (~250ms)
+            AuraManager.PlayerAuraState state = AuraManager.getState(sender.getUUID());
+            if (state != null) {
+                long now = sender.level().getGameTime();
+                if (now - state.getLastSelectionTick() < 5) return;
+                state.markSelectionTime(now);
+            }
+
+            // Log suspicious instrument IDs from unknown namespaces
+            String namespace = msg.instrumentId.getNamespace();
+            if (!"genshinstrument".equals(namespace) && !"evenmoreinstruments".equals(namespace)
+                    && !"minecraft".equals(namespace)) {
+                EffectiveInstrumentsMod.LOGGER.warn(
+                        "Player {} sent instrument open with unusual namespace: {}",
+                        sender.getName().getString(), msg.instrumentId);
+            }
 
             AuraManager.onInstrumentOpenWithId(sender, msg.instrumentId);
         });

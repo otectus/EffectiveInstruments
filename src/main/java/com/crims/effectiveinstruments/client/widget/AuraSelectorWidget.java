@@ -29,6 +29,7 @@ public class AuraSelectorWidget extends AbstractWidget {
     private static final int COMPACT_BUTTON_GAP = 2;
     private static final int MARGIN_RIGHT = 8;
     private static final int MARGIN_TOP = 8;
+    private static final double MAX_ROW_WIDTH_FRACTION = 0.6;
 
     private static int getButtonSize() {
         double scale = EIClientConfig.OVERLAY_SCALE.get();
@@ -48,42 +49,50 @@ public class AuraSelectorWidget extends AbstractWidget {
             @Nullable String currentSelectedId,
             Consumer<AuraPreset> onSelect
     ) {
-        super(
-                computeX(parentScreen, presets.size()),
-                MARGIN_TOP,
-                computeWidth(presets.size()),
-                getButtonSize(),
-                Component.translatable("widget.effectiveinstruments.aura_selector")
-        );
+        super(0, MARGIN_TOP, 0, 0,
+                Component.translatable("widget.effectiveinstruments.aura_selector"));
         this.parentScreen = parentScreen;
         this.onSelect = onSelect;
 
         int btnSize = getButtonSize();
         int btnGap = getButtonGap();
+        int count = presets.size();
+
+        // Compute row wrapping: limit row width to ~60% of screen width
+        int maxRowWidth = (int) (parentScreen.width * MAX_ROW_WIDTH_FRACTION);
+        int buttonsPerRow = Math.max(1, Math.min(count, (maxRowWidth + btnGap) / (btnSize + btnGap)));
+        int rows = count <= 0 ? 0 : (count + buttonsPerRow - 1) / buttonsPerRow;
+        int rowWidth = buttonsPerRow > 0
+                ? buttonsPerRow * btnSize + (buttonsPerRow - 1) * btnGap
+                : 0;
+
+        // Update widget dimensions and position
+        this.width = rowWidth;
+        this.height = rows > 0 ? rows * btnSize + (rows - 1) * btnGap : 0;
+        setX(parentScreen.width - rowWidth - MARGIN_RIGHT);
+
+        // Lay out buttons in a grid
+        int col = 0;
         int offsetX = 0;
+        int offsetY = 0;
         for (AuraPreset preset : presets) {
             boolean isSelected = preset.id().equals(currentSelectedId);
             AuraButtonWidget btn = new AuraButtonWidget(
-                    getX() + offsetX, getY(),
+                    getX() + offsetX, getY() + offsetY,
                     btnSize, btnSize,
                     preset, isSelected,
                     this::onButtonClicked
             );
             buttons.add(btn);
-            offsetX += btnSize + btnGap;
+            col++;
+            if (col >= buttonsPerRow) {
+                col = 0;
+                offsetX = 0;
+                offsetY += btnSize + btnGap;
+            } else {
+                offsetX += btnSize + btnGap;
+            }
         }
-    }
-
-    private static int computeX(Screen screen, int count) {
-        int totalWidth = computeWidth(count);
-        return screen.width - totalWidth - MARGIN_RIGHT;
-    }
-
-    private static int computeWidth(int count) {
-        if (count <= 0) return 0;
-        int btnSize = getButtonSize();
-        int btnGap = getButtonGap();
-        return count * btnSize + (count - 1) * btnGap;
     }
 
     private void onButtonClicked(AuraButtonWidget clicked) {

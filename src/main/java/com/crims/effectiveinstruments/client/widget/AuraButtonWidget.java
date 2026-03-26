@@ -13,6 +13,7 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -57,7 +58,7 @@ public class AuraButtonWidget extends AbstractWidget {
 
         // Icon texture centered — swap to selected variant when active, or letter fallback
         if (hasIconTexture) {
-            int iconSize = 16;
+            int iconSize = Math.min(16, width - 2);
             int iconX = getX() + (width - iconSize) / 2;
             int iconY = getY() + (height - iconSize) / 2;
             @Nullable ResourceLocation selectedIcon = preset.selectedIconTexture();
@@ -76,9 +77,25 @@ public class AuraButtonWidget extends AbstractWidget {
 
         // Tooltip on hover
         if (isHovered) {
+            List<Component> tooltipLines = new ArrayList<>();
+            tooltipLines.add(preset.displayName());
+            tooltipLines.add(preset.description());
+
+            // Effect list with Roman numeral levels
+            StringBuilder effectsLine = new StringBuilder();
+            for (AuraPreset.EffectEntry entry : preset.effects()) {
+                if (effectsLine.length() > 0) effectsLine.append(", ");
+                effectsLine.append(entry.effect().getDisplayName().getString());
+                effectsLine.append(" ").append(toRoman(entry.amplifier() + 1));
+            }
+            if (effectsLine.length() > 0) {
+                tooltipLines.add(Component.literal(effectsLine.toString())
+                        .withStyle(net.minecraft.ChatFormatting.GRAY));
+            }
+
             guiGraphics.renderTooltip(
                     Minecraft.getInstance().font,
-                    List.of(preset.displayName(), preset.description()),
+                    tooltipLines,
                     java.util.Optional.empty(),
                     mouseX, mouseY
             );
@@ -105,6 +122,17 @@ public class AuraButtonWidget extends AbstractWidget {
 
     public void setSelected(boolean selected) {
         this.selected = selected;
+    }
+
+    private static String toRoman(int num) {
+        return switch (num) {
+            case 1 -> "I";
+            case 2 -> "II";
+            case 3 -> "III";
+            case 4 -> "IV";
+            case 5 -> "V";
+            default -> String.valueOf(num);
+        };
     }
 
     @Override

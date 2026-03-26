@@ -7,6 +7,7 @@ import java.util.*;
 public final class AuraRegistry {
     private static final Map<String, AuraPreset> PRESETS = new LinkedHashMap<>();
     private static final List<String> ENABLED_IDS = new ArrayList<>();
+    private static List<AuraPreset> cachedEnabledPresets = List.of();
     private static boolean loaded = false;
 
     public static void load() {
@@ -21,12 +22,18 @@ public final class AuraRegistry {
                 ENABLED_IDS.add(preset.id());
             }
         }
+        cachedEnabledPresets = ENABLED_IDS.stream()
+                .map(PRESETS::get)
+                .filter(Objects::nonNull)
+                .toList();
         loaded = true;
         EffectiveInstrumentsMod.LOGGER.info("Loaded {} aura presets ({} enabled)",
                 PRESETS.size(), ENABLED_IDS.size());
 
         InstrumentAuraMapping.ensureDefaults();
         InstrumentAuraMapping.load();
+
+        AuraManager.invalidatePetAllowlistCache();
     }
 
     public static void reload() {
@@ -46,10 +53,7 @@ public final class AuraRegistry {
     }
 
     public static List<AuraPreset> getEnabledPresets() {
-        return ENABLED_IDS.stream()
-                .map(PRESETS::get)
-                .filter(Objects::nonNull)
-                .toList();
+        return cachedEnabledPresets;
     }
 
     private AuraRegistry() {}

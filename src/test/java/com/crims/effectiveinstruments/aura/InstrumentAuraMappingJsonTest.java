@@ -81,7 +81,7 @@ class InstrumentAuraMappingJsonTest {
     void parsesStringShorthand() {
         String json = """
                 {
-                    "genshinstrument:windsong_lyre": "soothing_hymn"
+                    "genshinstrument:windsong_lyre": "zephyrs_blessing"
                 }
                 """;
         Map<String, ParsedConfig> mappings = parseMappings(json);
@@ -89,8 +89,8 @@ class InstrumentAuraMappingJsonTest {
 
         ParsedConfig config = mappings.get("genshinstrument:windsong_lyre");
         assertNotNull(config);
-        assertEquals("soothing_hymn", config.defaultAuraId());
-        assertEquals(List.of("soothing_hymn"), config.allowedAuraIds());
+        assertEquals("zephyrs_blessing", config.defaultAuraId());
+        assertEquals(List.of("zephyrs_blessing"), config.allowedAuraIds());
     }
 
     @Test
@@ -98,16 +98,16 @@ class InstrumentAuraMappingJsonTest {
         String json = """
                 {
                     "genshinstrument:windsong_lyre": {
-                        "default": "soothing_hymn",
-                        "allowed": ["soothing_hymn", "guardian_chorus"]
+                        "default": "zephyrs_blessing",
+                        "allowed": ["zephyrs_blessing", "echoes_of_antiquity"]
                     }
                 }
                 """;
         Map<String, ParsedConfig> mappings = parseMappings(json);
         ParsedConfig config = mappings.get("genshinstrument:windsong_lyre");
         assertNotNull(config);
-        assertEquals("soothing_hymn", config.defaultAuraId());
-        assertEquals(List.of("soothing_hymn", "guardian_chorus"), config.allowedAuraIds());
+        assertEquals("zephyrs_blessing", config.defaultAuraId());
+        assertEquals(List.of("zephyrs_blessing", "echoes_of_antiquity"), config.allowedAuraIds());
     }
 
     @Test
@@ -115,8 +115,8 @@ class InstrumentAuraMappingJsonTest {
         String json = """
                 {
                     "genshinstrument:windsong_lyre": {
-                        "default": "soothing_hymn",
-                        "allowed": ["guardian_chorus"]
+                        "default": "zephyrs_blessing",
+                        "allowed": ["echoes_of_antiquity"]
                     }
                 }
                 """;
@@ -124,8 +124,8 @@ class InstrumentAuraMappingJsonTest {
         ParsedConfig config = mappings.get("genshinstrument:windsong_lyre");
         assertNotNull(config);
         // Default should be auto-added to allowed even if not explicitly listed
-        assertTrue(config.allowedAuraIds().contains("soothing_hymn"));
-        assertTrue(config.allowedAuraIds().contains("guardian_chorus"));
+        assertTrue(config.allowedAuraIds().contains("zephyrs_blessing"));
+        assertTrue(config.allowedAuraIds().contains("echoes_of_antiquity"));
     }
 
     @Test
@@ -133,14 +133,14 @@ class InstrumentAuraMappingJsonTest {
         String json = """
                 {
                     "genshinstrument:windsong_lyre": {
-                        "default": "soothing_hymn"
+                        "default": "zephyrs_blessing"
                     }
                 }
                 """;
         Map<String, ParsedConfig> mappings = parseMappings(json);
         ParsedConfig config = mappings.get("genshinstrument:windsong_lyre");
         assertNotNull(config);
-        assertEquals(List.of("soothing_hymn"), config.allowedAuraIds());
+        assertEquals(List.of("zephyrs_blessing"), config.allowedAuraIds());
     }
 
     @Test
@@ -148,7 +148,7 @@ class InstrumentAuraMappingJsonTest {
         String json = """
                 {
                     "_comment": "This is a comment",
-                    "genshinstrument:ukulele": "soothing_hymn"
+                    "genshinstrument:ukulele": "zephyrs_blessing"
                 }
                 """;
         Map<String, ParsedConfig> mappings = parseMappings(json);
@@ -161,7 +161,7 @@ class InstrumentAuraMappingJsonTest {
         String json = """
                 {
                     "genshinstrument:ukulele": null,
-                    "genshinstrument:floral_zither": "guardian_chorus"
+                    "genshinstrument:floral_zither": "echoes_of_antiquity"
                 }
                 """;
         Map<String, ParsedConfig> mappings = parseMappings(json);
@@ -174,7 +174,7 @@ class InstrumentAuraMappingJsonTest {
         String json = """
                 {
                     "genshinstrument:ukulele": "",
-                    "genshinstrument:floral_zither": "guardian_chorus"
+                    "genshinstrument:floral_zither": "echoes_of_antiquity"
                 }
                 """;
         Map<String, ParsedConfig> mappings = parseMappings(json);
@@ -186,7 +186,7 @@ class InstrumentAuraMappingJsonTest {
         String json = """
                 {
                     "genshinstrument:ukulele": 42,
-                    "genshinstrument:windsong_lyre": "soothing_hymn"
+                    "genshinstrument:windsong_lyre": "zephyrs_blessing"
                 }
                 """;
         Map<String, ParsedConfig> mappings = parseMappings(json);
@@ -203,10 +203,10 @@ class InstrumentAuraMappingJsonTest {
     void handlesMixedFormats() {
         String json = """
                 {
-                    "genshinstrument:windsong_lyre": "soothing_hymn",
+                    "genshinstrument:windsong_lyre": "zephyrs_blessing",
                     "genshinstrument:glorious_drum": {
-                        "default": "invigorating_march",
-                        "allowed": ["invigorating_march", "guardian_chorus"]
+                        "default": "warcry_cadence",
+                        "allowed": ["warcry_cadence", "echoes_of_antiquity"]
                     }
                 }
                 """;
@@ -214,11 +214,11 @@ class InstrumentAuraMappingJsonTest {
         assertEquals(2, mappings.size());
 
         ParsedConfig lyre = mappings.get("genshinstrument:windsong_lyre");
-        assertEquals("soothing_hymn", lyre.defaultAuraId());
+        assertEquals("zephyrs_blessing", lyre.defaultAuraId());
         assertEquals(1, lyre.allowedAuraIds().size());
 
         ParsedConfig drum = mappings.get("genshinstrument:glorious_drum");
-        assertEquals("invigorating_march", drum.defaultAuraId());
+        assertEquals("warcry_cadence", drum.defaultAuraId());
         assertEquals(2, drum.allowedAuraIds().size());
     }
 
@@ -227,8 +227,8 @@ class InstrumentAuraMappingJsonTest {
         String json = """
                 {
                     "genshinstrument:windsong_lyre": {
-                        "default": "soothing_hymn",
-                        "allowed": ["soothing_hymn", "soothing_hymn", "guardian_chorus"]
+                        "default": "zephyrs_blessing",
+                        "allowed": ["zephyrs_blessing", "zephyrs_blessing", "echoes_of_antiquity"]
                     }
                 }
                 """;

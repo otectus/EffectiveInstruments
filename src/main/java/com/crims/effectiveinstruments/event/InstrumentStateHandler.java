@@ -4,6 +4,7 @@ import com.crims.effectiveinstruments.EffectiveInstrumentsMod;
 import com.crims.effectiveinstruments.aura.AuraManager;
 import com.cstav.genshinstrument.event.InstrumentOpenStateChangedEvent;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -35,6 +36,9 @@ public class InstrumentStateHandler {
 
     @SubscribeEvent
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
+        if (event.getEntity() instanceof ServerPlayer sp) {
+            AuraManager.onAuraSwitch(sp);
+        }
         AuraManager.onPlayerLogout(event.getEntity().getUUID());
     }
 
