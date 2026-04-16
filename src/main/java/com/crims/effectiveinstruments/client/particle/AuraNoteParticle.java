@@ -1,5 +1,6 @@
 package com.crims.effectiveinstruments.client.particle;
 
+import com.crims.effectiveinstruments.config.EIClientConfig;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.particle.ParticleRenderType;
 import net.minecraft.client.particle.SpriteSet;
@@ -49,9 +50,10 @@ public class AuraNoteParticle extends TextureSheetParticle {
             alpha = BASE_ALPHA;
         }
 
-        // Gentle sinusoidal horizontal drift
-        this.xd += Math.sin(age * 0.15) * 0.002;
-        this.zd += Math.cos(age * 0.15 + 1.0) * 0.002;
+        // Gentle sinusoidal horizontal drift (halved when reduced motion is on)
+        double driftScale = EIClientConfig.REDUCED_MOTION.get() ? 0.001 : 0.002;
+        this.xd += Math.sin(age * 0.15) * driftScale;
+        this.zd += Math.cos(age * 0.15 + 1.0) * driftScale;
 
         this.move(this.xd, this.yd, this.zd);
 
@@ -67,8 +69,9 @@ public class AuraNoteParticle extends TextureSheetParticle {
 
     @Override
     public float getQuadSize(float partialTick) {
-        // Subtle pulse
-        float pulse = 1.0f + 0.1f * (float) Math.sin(age * 0.2 + partialTick * 0.2);
+        // Subtle pulse — halved when reduced motion is on
+        float pulseAmplitude = EIClientConfig.REDUCED_MOTION.get() ? 0.05f : 0.1f;
+        float pulse = 1.0f + pulseAmplitude * (float) Math.sin(age * 0.2 + partialTick * 0.2);
         return this.quadSize * pulse;
     }
 }

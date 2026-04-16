@@ -26,9 +26,24 @@ public final class AuraJsonLoader {
         return FMLPaths.CONFIGDIR.get().resolve("effective_instruments/.defaults_generated");
     }
 
+    /**
+     * Distinct marker for the mobile-tier preset defaults added in 1.3.0. Using a
+     * separate marker from {@link #getMarkerFile()} is the non-negotiable migration
+     * detail — upgraded installs already have the stationary marker, so reusing it
+     * would silently skip the new mobile defaults.
+     */
+    private static Path getMobileMarkerFile() {
+        return FMLPaths.CONFIGDIR.get().resolve("effective_instruments/.mobile_aura_defaults_generated");
+    }
+
     // --- Default generation ---
 
     public static void ensureDefaults() {
+        ensureStationaryDefaults();
+        ensureMobileDefaults();
+    }
+
+    private static void ensureStationaryDefaults() {
         Path marker = getMarkerFile();
         if (Files.exists(marker)) return;
 
@@ -145,10 +160,102 @@ public final class AuraJsonLoader {
         writeDefaultJson(dir, id, displayName, description, color, durationTicks, sortOrder, effects, null, null);
     }
 
+    /**
+     * Generate the mobile-tier preset JSONs (1.3.0+). Guarded by a distinct marker
+     * from the stationary defaults so upgraded installs receive these on their
+     * next boot even if the stationary marker already exists.
+     */
+    private static void ensureMobileDefaults() {
+        Path marker = getMobileMarkerFile();
+        if (Files.exists(marker)) return;
+
+        Path aurasDir = getAurasDir();
+        try {
+            Files.createDirectories(aurasDir);
+
+            // Each mobile preset: single effect, 60-tick duration, radius -1 → mobile default radius.
+            // sortOrder starts at 200 to land below stationary presets (0-14) in any list view.
+            writeMobileDefault(aurasDir, "windstep_mobile", "Windstep",
+                    "A light melody that keeps nearby allies nimble while on the move", "7FDBCA", 60, 200,
+                    "minecraft:speed", 0);
+            writeMobileDefault(aurasDir, "traveler_hum_mobile", "Traveler's Hum",
+                    "A wandering tune that stirs fortune for travellers nearby", "D4A574", 60, 201,
+                    "minecraft:luck", 0);
+            writeMobileDefault(aurasDir, "measured_tempo_mobile", "Measured Tempo",
+                    "A steady rhythm that quickens the hands of nearby allies", "EEEEFF", 60, 202,
+                    "minecraft:haste", 0);
+            writeMobileDefault(aurasDir, "hearthsong_mobile", "Hearthsong",
+                    "A warm hearth-song that slowly mends nearby allies", "CC4466", 60, 203,
+                    "minecraft:regeneration", 0);
+            writeMobileDefault(aurasDir, "earthpulse_mobile", "Earthpulse",
+                    "A deep drone that lightens the step of nearby allies", "CC6633", 60, 204,
+                    "minecraft:jump_boost", 0);
+            writeMobileDefault(aurasDir, "steadfast_drone_mobile", "Steadfast Drone",
+                    "A resolute drone that steels nearby allies against harm", "CC8800", 60, 205,
+                    "minecraft:resistance", 0);
+            writeMobileDefault(aurasDir, "brass_call_mobile", "Brass Call",
+                    "A brassy call that emboldens nearby allies to strike harder", "FF6644", 40, 206,
+                    "minecraft:strength", 0);
+            writeMobileDefault(aurasDir, "march_tap_mobile", "March Tap",
+                    "A marching beat that quickens nearby allies on the road", "B8860B", 60, 207,
+                    "minecraft:speed", 0);
+            writeMobileDefault(aurasDir, "clear_ping_mobile", "Clear Ping",
+                    "A pure tone that sharpens night-sight for nearby allies", "6644BB", 100, 208,
+                    "minecraft:night_vision", 0);
+            writeMobileDefault(aurasDir, "stillwater_mobile", "Stillwater",
+                    "A tranquil resonance that lets nearby allies breathe underwater", "44AACC", 100, 209,
+                    "minecraft:water_breathing", 0);
+            writeMobileDefault(aurasDir, "shade_resonance_mobile", "Shade Resonance",
+                    "A deep, cool resonance that shields nearby allies from flame", "88CCFF", 80, 210,
+                    "minecraft:fire_resistance", 0);
+
+            Files.createFile(marker);
+            EffectiveInstrumentsMod.LOGGER.info("Generated mobile-tier default aura presets");
+        } catch (IOException e) {
+            EffectiveInstrumentsMod.LOGGER.error("Failed to generate mobile-tier default aura presets", e);
+        }
+    }
+
+    /**
+     * Helper for writing a single-effect, mobile-only preset. Emits
+     * {@code "tiers": ["mobile"]} and {@code "showInSelector": false} explicitly
+     * so the parser lands in the mobile branch and the selector UI never sees it.
+     */
+    private static void writeMobileDefault(
+            Path dir, String id, String displayName, String description,
+            String color, int durationTicks, int sortOrder,
+            String effectId, int amplifier
+    ) throws IOException {
+        JsonObject root = new JsonObject();
+        root.addProperty(AuraSchema.FIELD, AuraSchema.CURRENT_VERSION);
+        root.addProperty("displayName", displayName);
+        root.addProperty("description", description);
+        root.addProperty("color", color);
+        root.addProperty("enabled", true);
+        root.addProperty("durationTicks", durationTicks);
+        root.addProperty("radius", -1);
+        root.addProperty("sortOrder", sortOrder);
+
+        JsonArray tiers = new JsonArray();
+        tiers.add("mobile");
+        root.add("tiers", tiers);
+        root.addProperty("showInSelector", false);
+
+        JsonArray effectsArray = new JsonArray();
+        JsonObject eff = new JsonObject();
+        eff.addProperty("effect", effectId);
+        eff.addProperty("amplifier", amplifier);
+        effectsArray.add(eff);
+        root.add("effects", effectsArray);
+
+        Files.writeString(dir.resolve(id + ".json"), GSON.toJson(root), StandardCharsets.UTF_8);
+    }
+
     private static void writeDefaultJson(Path dir, String id, String displayName, String description,
                                           String color, int durationTicks, int sortOrder,
                                           String[][] effects, String icon, String iconSelected) throws IOException {
         JsonObject root = new JsonObject();
+        root.addProperty(AuraSchema.FIELD, AuraSchema.CURRENT_VERSION);
         root.addProperty("displayName", displayName);
         root.addProperty("description", description);
         root.addProperty("color", color);
@@ -313,6 +420,24 @@ public final class AuraJsonLoader {
             return null;
         }
 
+        // schemaVersion — forward-compat gate. Missing field is treated as v1.
+        if (root.has(AuraSchema.FIELD)) {
+            int version;
+            try {
+                version = root.get(AuraSchema.FIELD).getAsInt();
+            } catch (Exception e) {
+                EffectiveInstrumentsMod.LOGGER.warn(
+                        "Aura file '{}' has non-integer schemaVersion, skipping", filename);
+                return null;
+            }
+            if (version > AuraSchema.CURRENT_VERSION) {
+                EffectiveInstrumentsMod.LOGGER.warn(
+                        "Aura file '{}' has schemaVersion {} which is newer than this mod supports ({}), skipping",
+                        filename, version, AuraSchema.CURRENT_VERSION);
+                return null;
+            }
+        }
+
         // displayName
         Component displayName = parseComponent(root, "displayName", id);
         // description
@@ -374,11 +499,44 @@ public final class AuraJsonLoader {
         ResourceLocation iconTexture = parseOptionalResourceLocation(root, "icon");
         ResourceLocation selectedIconTexture = parseOptionalResourceLocation(root, "iconSelected");
 
+        // tiers (optional). Missing field → stationary-only (pre-1.3.0 behavior).
+        Set<BuffTier> supportedTiers = parseTiers(root, id);
+
+        // showInSelector (optional). Default: visible iff this preset supports the stationary tier.
+        boolean showInSelector = root.has("showInSelector")
+                ? root.get("showInSelector").getAsBoolean()
+                : supportedTiers.contains(BuffTier.STATIONARY);
+
         return new AuraPreset(
                 id, displayName, description, color, effects,
                 durationTicks, radius, enabled, sortOrder,
-                iconTexture, selectedIconTexture
+                iconTexture, selectedIconTexture,
+                supportedTiers, showInSelector
         );
+    }
+
+    private static Set<BuffTier> parseTiers(JsonObject root, String auraId) {
+        if (!root.has("tiers") || !root.get("tiers").isJsonArray()) {
+            return EnumSet.of(BuffTier.STATIONARY);
+        }
+        EnumSet<BuffTier> tiers = EnumSet.noneOf(BuffTier.class);
+        for (JsonElement elem : root.getAsJsonArray("tiers")) {
+            if (!elem.isJsonPrimitive()) continue;
+            BuffTier parsed = BuffTier.fromJson(elem.getAsString());
+            if (parsed != null) {
+                tiers.add(parsed);
+            } else {
+                EffectiveInstrumentsMod.LOGGER.warn(
+                        "Aura '{}' declares unknown tier '{}', ignoring",
+                        auraId, elem.getAsString());
+            }
+        }
+        if (tiers.isEmpty()) {
+            EffectiveInstrumentsMod.LOGGER.warn(
+                    "Aura '{}' has empty 'tiers' array after parsing, defaulting to stationary", auraId);
+            return EnumSet.of(BuffTier.STATIONARY);
+        }
+        return tiers;
     }
 
     private static Component parseComponent(JsonObject root, String key, String fallback) {

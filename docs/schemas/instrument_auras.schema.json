@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/otectus/EffectiveInstruments/blob/main/docs/schemas/instrument_auras.schema.json",
+  "title": "Effective Instruments — Instrument Aura Mapping",
+  "description": "Schema for config/effective_instruments/instrument_auras.json. Maps instrument ResourceLocation ids to aura configs.",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "description": "Schema version. Current: 1. Files with a newer version than the running mod supports are rejected.",
+      "minimum": 1,
+      "default": 1
+    }
+  },
+  "patternProperties": {
+    "^_": {
+      "description": "Keys starting with underscore are treated as comments and ignored by the loader."
+    },
+    "^[a-z0-9_.-]+:[a-z0-9_/.-]+$": {
+      "description": "Instrument ResourceLocation key. Value is either a shorthand aura id string or a config object.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Shorthand: sets both default and only-allowed aura to this id."
+        },
+        {
+          "type": "object",
+          "required": ["default"],
+          "properties": {
+            "default": {
+              "type": "string",
+              "description": "The aura id auto-selected when the instrument opens."
+            },
+            "allowed": {
+              "type": "array",
+              "description": "All aura ids shown in the selector. The default is always included automatically.",
+              "items": { "type": "string" },
+              "uniqueItems": true
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

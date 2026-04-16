@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main ]
 
+# Least-privilege: the build job only needs to read the repo contents.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,9 +24,22 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - run: ./gradlew build
+      - name: Build and run unit tests
+        run: ./gradlew build
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload mod jar
+        uses: actions/upload-artifact@v4
         with:
           name: mod-jar
           path: build/libs/*.jar
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: build/reports/tests/
+          retention-days: 7
+          if-no-files-found: ignore

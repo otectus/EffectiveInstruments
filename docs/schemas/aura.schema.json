@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/otectus/EffectiveInstruments/blob/main/docs/schemas/aura.schema.json",
+  "title": "Effective Instruments — Aura Preset",
+  "description": "Schema for a single aura preset JSON file under config/effective_instruments/auras/",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "description": "Schema version. Current: 1. Files with a newer version than the running mod supports are rejected.",
+      "minimum": 1,
+      "default": 1
+    },
+    "displayName": {
+      "type": ["string", "object"],
+      "description": "UI label. String literal or a Minecraft Component JSON (e.g. {\"translate\":\"...\"})."
+    },
+    "description": {
+      "type": ["string", "object"],
+      "description": "Tooltip description. String literal or Component JSON."
+    },
+    "color": {
+      "type": "string",
+      "description": "Hex color (6 characters, no 0x or # prefix). Invalid values fall back to FFFFFF.",
+      "pattern": "^[0-9A-Fa-f]{6}$"
+    },
+    "enabled": { "type": "boolean", "default": true },
+    "durationTicks": { "type": "integer", "minimum": 1, "default": 160 },
+    "radius": {
+      "type": "integer",
+      "description": "Aura radius in blocks. Use -1 to inherit the global default.",
+      "minimum": -1,
+      "default": -1
+    },
+    "sortOrder": {
+      "type": "integer",
+      "description": "UI ordering. Lower sorts further left.",
+      "default": 100
+    },
+    "effects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["effect"],
+        "properties": {
+          "effect": {
+            "type": "string",
+            "description": "Effect registry id, e.g. minecraft:regeneration",
+            "pattern": "^[a-z0-9_.-]+:[a-z0-9_/.-]+$"
+          },
+          "amplifier": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4,
+            "description": "Effect level minus 1 (0 = Level I). Values outside 0..4 are clamped.",
+            "default": 0
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "icon": {
+      "type": "string",
+      "description": "Optional button texture ResourceLocation, e.g. effectiveinstruments:textures/gui/aura_example.png"
+    },
+    "iconSelected": {
+      "type": "string",
+      "description": "Optional selected-state button texture ResourceLocation"
+    }
+  },
+  "required": ["effects"],
+  "additionalProperties": true
+}

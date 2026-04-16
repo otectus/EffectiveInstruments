@@ -9,24 +9,15 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffect;
-import net.minecraft.world.effect.MobEffectInstance;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.TamableAnimal;
-import net.minecraft.world.entity.animal.horse.AbstractHorse;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.phys.AABB;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class AuraManager {
     // All access occurs on the main server thread (tick handler, enqueueWork packet handlers, Forge events).
     private static final Map<UUID, PlayerAuraState> PLAYER_STATES = new HashMap<>();
     private static final Set<UUID> activeMusicians = new HashSet<>();
-    private static Set<ResourceLocation> cachedPetAllowlist = Set.of();
 
     public static class PlayerAuraState {
         @Nullable
@@ -35,6 +26,12 @@ public class AuraManager {
         ResourceLocation currentInstrumentId;
         long lastNoteGameTime = -1;
         long lastSelectionTick = -1;
+        long lastOpenPacketTick = -1;
+        // Sliding window of note timestamps for the activation-threshold check.
+        // Bounded in practice by NOTE_THRESHOLD_WINDOW_TICKS * note rate.
+        final Deque<Long> recentNoteTicks = new ArrayDeque<>();
+        // Authoritative instrument-open flag — set only by the server-side
+        // InstrumentOpenStateChangedEvent handler, never by a client packet.
         boolean instrumentOpen = false;
         // entity network ID -> set of effects we applied to that entity
         final Map<Integer, Set<MobEffect>> affectedTargets = new HashMap<>();
@@ -53,10 +50,31 @@ public class AuraManager {
 
         public void markSelectionTime(long gameTick) { this.lastSelectionTick = gameTick; }
 
+        public long getLastOpenPacketTick() { return lastOpenPacketTick; }
+
+        public void markOpenPacketTime(long gameTick) { this.lastOpenPacketTick = gameTick; }
+
+        /** Record a note event and prune stale entries beyond the threshold window. */
+        void recordNote(long gameTick) {
+            recentNoteTicks.addLast(gameTick);
+            long windowStart = gameTick - EIServerConfig.NOTE_THRESHOLD_WINDOW_TICKS.get();
+            while (!recentNoteTicks.isEmpty() && recentNoteTicks.peekFirst() < windowStart) {
+                recentNoteTicks.removeFirst();
+            }
+            this.lastNoteGameTime = gameTick;
+        }
+
         boolean isActive(long currentGameTime) {
             if (selectedAura == null || !instrumentOpen) return false;
             long window = EIServerConfig.NOTE_WINDOW_TICKS.get();
-            return (currentGameTime - lastNoteGameTime) <= window;
+            if ((currentGameTime - lastNoteGameTime) > window) return false;
+            // Activation threshold: require at least N notes in the sliding window.
+            // Prune stale entries so the check reflects *current* play, not ancient history.
+            long thresholdWindowStart = currentGameTime - EIServerConfig.NOTE_THRESHOLD_WINDOW_TICKS.get();
+            while (!recentNoteTicks.isEmpty() && recentNoteTicks.peekFirst() < thresholdWindowStart) {
+                recentNoteTicks.removeFirst();
+            }
+            return recentNoteTicks.size() >= EIServerConfig.NOTE_THRESHOLD_MIN.get();
         }
     }
 
@@ -74,23 +92,29 @@ public class AuraManager {
 
     public static void onNotePlayed(ServerPlayer player) {
         PlayerAuraState state = getOrCreate(player.getUUID());
-        state.lastNoteGameTime = player.level().getGameTime();
+        state.recordNote(player.level().getGameTime());
     }
 
     /**
-     * Fallback open handler (no instrument ID). Called by InstrumentOpenStateChangedEvent.
-     * The real instrument-aware open is triggered by InstrumentOpenC2SPacket via onInstrumentOpenWithId().
+     * Authoritative "instrument opened" signal. Called only from the server-side
+     * {@link com.cstav.genshinstrument.event.InstrumentOpenStateChangedEvent} handler.
+     * Client packets can annotate state but must never set this flag directly.
      */
     public static void onInstrumentOpen(Player player) {
         getOrCreate(player.getUUID()).instrumentOpen = true;
         activeMusicians.add(player.getUUID());
     }
 
-    public static void onInstrumentOpenWithId(ServerPlayer player, ResourceLocation instrumentId) {
+    /**
+     * Non-authoritative annotation from the client {@code InstrumentOpenC2SPacket}.
+     * Records which instrument the player has open and, if a default aura is
+     * configured for that instrument, auto-selects it. Does NOT toggle the
+     * authoritative open flag or register the player as an active musician —
+     * those transitions are reserved for {@link #onInstrumentOpen}.
+     */
+    public static void onInstrumentIdReceived(ServerPlayer player, ResourceLocation instrumentId) {
         PlayerAuraState state = getOrCreate(player.getUUID());
         state.currentInstrumentId = instrumentId;
-        state.instrumentOpen = true;
-        activeMusicians.add(player.getUUID());
 
         // Auto-select default aura for this instrument
         String defaultAuraId = InstrumentAuraMapping.getDefaultAuraId(instrumentId);
@@ -138,6 +162,11 @@ public class AuraManager {
 
         if (gameTime % interval != 0) return;
 
+        boolean debug = EIServerConfig.DEBUG_MODE.get();
+        long tickStartNanos = debug ? System.nanoTime() : 0L;
+        int activeCount = 0;
+        int totalTargetCount = 0;
+
         // Iterate only active musicians instead of all players in the level
         for (UUID musicianId : List.copyOf(activeMusicians)) {
             PlayerAuraState state = PLAYER_STATES.get(musicianId);
@@ -163,98 +192,35 @@ public class AuraManager {
 
             applyAuraEffects(player, aura);
             spawnAuraParticles(player, aura);
+
+            if (debug) {
+                activeCount++;
+                totalTargetCount += state.getAffectedTargetCount();
+            }
+        }
+
+        if (debug && activeCount > 0) {
+            long elapsedMicros = (System.nanoTime() - tickStartNanos) / 1000L;
+            EffectiveInstrumentsMod.LOGGER.info(
+                    "[EI debug] tick={} musicians={} totalTargets={} elapsedUs={}",
+                    gameTime, activeCount, totalTargetCount, elapsedMicros);
         }
     }
 
     private static void applyAuraEffects(ServerPlayer source, AuraPreset aura) {
         int radius = aura.getEffectiveRadius();
         int duration = aura.getEffectiveDuration();
-        List<LivingEntity> targets = gatherTargets(source, radius);
         PlayerAuraState state = getOrCreate(source.getUUID());
-
-        for (LivingEntity target : targets) {
-            Set<MobEffect> applied = state.affectedTargets
-                    .computeIfAbsent(target.getId(), k -> new HashSet<>());
-            for (AuraPreset.EffectEntry entry : aura.effects()) {
-                if (applyEffectSafely(target, entry.effect(), entry.amplifier(), duration)) {
-                    applied.add(entry.effect());
-                }
-            }
-        }
+        AuraApplicator.apply(source, aura, radius, duration, stationaryProfile(), state.affectedTargets);
     }
 
-    private static List<LivingEntity> gatherTargets(ServerPlayer source, int radius) {
-        List<LivingEntity> targets = new ArrayList<>();
-        AABB box = source.getBoundingBox().inflate(radius);
-
-        // Self
-        if (EIServerConfig.ALLOW_SELF_BUFF.get()) {
-            targets.add(source);
-        }
-
-        // Other players
-        if (EIServerConfig.INCLUDE_OTHER_PLAYERS.get()) {
-            for (Player other : source.serverLevel().getEntitiesOfClass(Player.class, box)) {
-                if (other != source && source.distanceToSqr(other) <= (double) radius * radius) {
-                    targets.add(other);
-                }
-            }
-        }
-
-        // Tamed pets
-        if (EIServerConfig.INCLUDE_TAMED_PETS.get()) {
-            Set<ResourceLocation> extraPetTypes = cachedPetAllowlist;
-
-            for (Entity entity : source.serverLevel().getEntities(source, box)) {
-                if (!(entity instanceof LivingEntity living)) continue;
-                if (source.distanceToSqr(entity) > (double) radius * radius) continue;
-
-                // TamableAnimal (wolf, cat, parrot, etc.)
-                if (entity instanceof TamableAnimal tamable
-                        && tamable.isTame()
-                        && source.getUUID().equals(tamable.getOwnerUUID())) {
-                    targets.add(living);
-                    continue;
-                }
-
-                // AbstractHorse (horse, donkey, mule, llama)
-                if (entity instanceof AbstractHorse horse
-                        && horse.isTamed()
-                        && source.getUUID().equals(horse.getOwnerUUID())) {
-                    targets.add(living);
-                    continue;
-                }
-
-                // Extra pet types from config
-                ResourceLocation typeId = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType());
-                if (typeId != null && extraPetTypes.contains(typeId)) {
-                    targets.add(living);
-                }
-            }
-        }
-
-        return targets;
-    }
-
-    /**
-     * STRONGEST_WINS: only apply if our amplifier >= existing amplifier.
-     * Never remove effects we didn't apply.
-     * @return true if the effect was actually applied
-     */
-    private static boolean applyEffectSafely(
-            LivingEntity target, MobEffect effect, int amplifier, int duration
-    ) {
-        MobEffectInstance existing = target.getEffect(effect);
-        if (existing != null && existing.getAmplifier() > amplifier) {
-            return false;
-        }
-        target.addEffect(new MobEffectInstance(
-                effect, duration, amplifier,
-                true,   // ambient (subtle particles)
-                true,   // visible
-                true    // show icon
-        ));
-        return true;
+    private static TargetingProfile stationaryProfile() {
+        return new TargetingProfile(
+                EIServerConfig.ALLOW_SELF_BUFF.get(),
+                EIServerConfig.INCLUDE_OTHER_PLAYERS.get(),
+                EIServerConfig.INCLUDE_TAMED_PETS.get(),
+                EIServerConfig.MAX_TARGETS_PER_TICK.get()
+        );
     }
 
     /**
@@ -271,40 +237,11 @@ public class AuraManager {
     // Entity lookups for targets in the OLD dimension will return null, so those effects are not
     // actively cleaned up. This is acceptable — effects expire naturally within 13 seconds (260 ticks max).
     private static void clearPreviousAuraEffects(ServerPlayer musician, PlayerAuraState state) {
-        if (state.affectedTargets.isEmpty() || state.selectedAura == null) return;
-
-        ServerLevel level = musician.serverLevel();
         AuraPreset oldAura = state.selectedAura;
-
-        // Build a map of effect -> amplifier for the old aura so we only strip ours
-        Map<MobEffect, Integer> ourEffects = new HashMap<>();
-        for (AuraPreset.EffectEntry entry : oldAura.effects()) {
-            ourEffects.put(entry.effect(), entry.amplifier());
-        }
-
+        if (oldAura == null) return;
         // Effects with much longer remaining duration than our aura's are likely from other sources
         int maxExpectedDuration = oldAura.getEffectiveDuration() + EIServerConfig.AURA_TICK_INTERVAL.get() * 2;
-
-        for (Map.Entry<Integer, Set<MobEffect>> entry : state.affectedTargets.entrySet()) {
-            Entity entity = level.getEntity(entry.getKey());
-            if (!(entity instanceof LivingEntity living)) continue;
-
-            for (MobEffect effect : entry.getValue()) {
-                Integer ourAmplifier = ourEffects.get(effect);
-                if (ourAmplifier == null) continue;
-
-                MobEffectInstance current = living.getEffect(effect);
-                if (current == null) continue;
-
-                // Only remove if the effect looks like ours: ambient + matching amplifier + plausible duration
-                if (current.isAmbient() && current.getAmplifier() == ourAmplifier
-                        && current.getDuration() <= maxExpectedDuration) {
-                    living.removeEffect(effect);
-                }
-            }
-        }
-
-        state.affectedTargets.clear();
+        AuraApplicator.clear(musician.serverLevel(), oldAura, maxExpectedDuration, state.affectedTargets);
     }
 
     private static void spawnAuraParticles(ServerPlayer source, AuraPreset aura) {
@@ -331,10 +268,14 @@ public class AuraManager {
         }
     }
 
-    public static void invalidatePetAllowlistCache() {
-        cachedPetAllowlist = EIServerConfig.PET_ENTITY_ALLOWLIST.get().stream()
-                .map(ResourceLocation::new)
-                .collect(Collectors.toUnmodifiableSet());
+    /**
+     * Thin wrapper used by the mobile tier (and future callers) to check whether
+     * a player currently has an active stationary aura without reaching into
+     * {@link PlayerAuraState}. Returns false when the player has no tracked state.
+     */
+    public static boolean isActive(UUID playerId, long currentGameTime) {
+        PlayerAuraState state = PLAYER_STATES.get(playerId);
+        return state != null && state.isActive(currentGameTime);
     }
 
     private static PlayerAuraState getOrCreate(UUID playerId) {

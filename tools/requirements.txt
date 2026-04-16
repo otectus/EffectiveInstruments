@@ -1,0 +1,3 @@
+# Python dependencies for tools/ scripts.
+# Pinned majors to keep icon regeneration deterministic across contributors.
+Pillow>=10.0,<11.0

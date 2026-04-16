@@ -33,7 +33,10 @@ public final class AuraRegistry {
         InstrumentAuraMapping.ensureDefaults();
         InstrumentAuraMapping.load();
 
-        AuraManager.invalidatePetAllowlistCache();
+        MobileInstrumentAuraMapping.ensureDefaults();
+        MobileInstrumentAuraMapping.load();
+
+        AuraApplicator.invalidatePetAllowlistCache();
     }
 
     public static void reload() {

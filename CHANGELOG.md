@@ -1,6 +1,128 @@
 # Changelog
 
 All notable changes to Effective Instruments will be documented in this file.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/).
+
+## [1.3.0] - 2026-04-15
+
+### Build & Distribution
+- **Reproducible builds:** dependencies now resolve from Curse Maven
+  (`cursemaven.com`) instead of requiring local jars in `Dependencies/`.
+  Project + file IDs live in `gradle.properties` so version bumps touch
+  one file. A fresh clone builds with `./gradlew build` — no manual setup.
+- `gradle/wrapper/gradle-wrapper.jar` is now committed, so `./gradlew`
+  works on a clean clone.
+- Added `LICENSE` file at repo root (MIT), aligning the three previous
+  sources of truth (gradle.properties, mods.toml, repo root).
+- CI hardening: workflow now declares `permissions: contents: read`,
+  uploads test reports on failure with 7-day retention, and sets
+  14-day retention on mod jar artifacts.
+- New `.github/workflows/dependency-submission.yml` publishes the Gradle
+  dependency graph to GitHub Insights for supply-chain visibility.
+
+### Data Schema
+- Aura preset JSON and `instrument_auras.json` now accept an optional
+  `schemaVersion` field (current: 1). Files with a schema newer than the
+  running mod are rejected with a clear log message. Missing field is
+  treated as v1, so existing configs keep working untouched.
+- Added `docs/schemas/aura.schema.json` and
+  `docs/schemas/instrument_auras.schema.json` (JSON Schema Draft-07)
+  for editor autocomplete and validation.
+
+### Security & Trust Boundary
+- **Server-authoritative instrument-open state:** `InstrumentOpenC2SPacket`
+  no longer sets the authoritative open flag. That transition is now
+  exclusively driven by the server-side `InstrumentOpenStateChangedEvent`
+  handler. A spoofed client packet cannot pre-apply aura effects, because
+  the aura tick still requires the authoritative flag.
+- Rate limiting for the open and aura-select packets now tracks
+  cooldowns independently (`lastOpenPacketTick` vs `lastSelectionTick`),
+  so the two packet types cannot starve each other.
+
+### Gameplay / Modpack Features
+- **`effectOverwritePolicy` server config**: controls how aura effects
+  interact with pre-existing effects on targets. Choices:
+  `NEVER_OVERWRITE`, `STRONGER_ONLY`, `REFRESH_TIES` (default — matches
+  pre-1.3.0 behavior), `ALWAYS`.
+- **Activation thresholds**: new `noteThresholdMin` + `noteThresholdWindowTicks`
+  server config keys. An aura only activates when the player has played
+  at least N notes within the sliding window. Default is 1, preserving
+  legacy behavior; pack authors can raise it to 3+ to prevent
+  "hold one note" exploits.
+- **`maxTargetsPerTick` server config**: hard cap on entities buffed per
+  musician per tick (default 32). Prevents performance cliffs in crowded
+  farms. Targets beyond the cap are dropped in insertion order
+  (self → players → pets).
+- **`debugMode` server config**: when true, logs per-tick diagnostics
+  (active musicians, scanned targets, elapsed microseconds).
+
+### Dual-Tier System (Immersive Melodies compat)
+- **Mobile tier**: passive, server-authoritative buff tier that activates
+  when a player holds a playing Immersive Melodies instrument. No hard
+  dependency — when Immersive Melodies is absent the compat layer is a
+  silent no-op. Stationary tier (Genshin Instruments / EMI screen play)
+  is unchanged and wins precedence when both would apply to the same
+  player (configurable via `suppressWhenStationaryActive`).
+- New `mobileTier` server config group: `enabled`, `pulseIntervalTicks`
+  (default 20), `lingerTicks` (60), `defaultRadius` (8),
+  `maxTargetsPerTick` (16), `allowSelfBuff`, `includeOtherPlayers`,
+  `includeTamedPets` (off by default), `suppressWhenStationaryActive`.
+- New mobile instrument mapping file
+  `config/effective_instruments/mobile_instrument_auras.json` with
+  defaults for all 11 Immersive Melodies instruments. Reloadable via
+  `/effectiveinstruments reload`.
+- New aura preset fields `tiers` (array: `["stationary"]`, `["mobile"]`,
+  or both) and `showInSelector` (bool). Both are optional and default to
+  pre-1.3.0 behavior, so existing JSONs need no edits. Mobile-only
+  presets never leak into the stationary selector UI.
+- Bundled 11 mobile-tier default presets (one per IM instrument),
+  each single-effect and short-duration for deliberate balance.
+- New migration markers `.mobile_aura_defaults_generated` and
+  `.mobile_instrument_defaults_generated` ensure upgraded installs
+  receive mobile defaults without clobbering stationary customizations.
+- **Known limitation**: mobile buffs fire for autoplay / selected-melody
+  playback only. Immersive Melodies free-play keyboard/MIDI mode does
+  not write the `playing=true` NBT flag this mod checks. Scheduled for
+  revisit in 1.3.1 if an upstream IM hook lands.
+
+### Refactor — AuraApplicator
+- Extracted `AuraApplicator` + `TargetingProfile` from `AuraManager`.
+  Both tiers now share the same strongest-wins effect logic, target
+  gathering, and tracked-target cleanup. Zero behavior change for the
+  stationary tier (`OverwritePolicy` semantics, pet allow-list, and
+  `maxTargetsPerTick` cap all preserved).
+- `AuraManager.isActive(UUID, long)` is now a public thin wrapper used
+  by the mobile tier's suppression check.
+
+### API
+- New `com.crims.effectiveinstruments.api.EffectiveInstrumentsAPI` facade.
+  Third-party instrument mods can now drive aura lifecycle events without
+  importing internal classes:
+  `notifyInstrumentOpen`, `notifyInstrumentIdReceived`,
+  `notifyInstrumentClose`, `notifyNotePlayed`.
+- Extended the API with `isImmersiveMelodiesCompatActive()` and
+  `getMobileState(ServerPlayer)` returning an immutable `MobileState`
+  snapshot for HUD addons and telemetry.
+
+### Accessibility
+- New client config `reducedMotion`: dampens aura particle drift and
+  pulse amplitude for players sensitive to rapid visual motion.
+
+### Commands
+- New `/effectiveinstruments help` subcommand printing config location
+  and available commands.
+- `/effectiveinstruments status <player>` now reports mobile-tier state
+  (aura id, instrument id, active flag, buffed-target count) whenever
+  Immersive Melodies compat is active.
+- `/effectiveinstruments reload` now reports the mobile mapping count
+  and compat activation state on success.
+
+### Tests
+- Added `OverwritePolicyTest` (5 cases), `AuraSchemaGateTest` (7 cases),
+  `AuraTierJsonTest` (14 cases), `AuraApplicatorBehaviorTest` (12 cases),
+  and `MobileInstrumentAuraMappingJsonTest` (10 cases). Total unit test
+  count: ~55.
 
 ## [1.2.1] - 2026-03-26
 

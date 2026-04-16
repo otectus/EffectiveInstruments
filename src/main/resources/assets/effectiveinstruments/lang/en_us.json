@@ -1,12 +1,21 @@
 {
     "widget.effectiveinstruments.aura_selector": "Aura Selector",
     "command.effectiveinstruments.reload.success": "Effective Instruments: Reloaded %s aura presets (%s enabled), %s instrument mappings",
+    "command.effectiveinstruments.reload.mobile_mappings": "Effective Instruments: %s mobile instrument mappings (compat %s)",
     "command.effectiveinstruments.status.header": "Effective Instruments — Player Status",
     "command.effectiveinstruments.status.aura": "Selected Aura: %s",
     "command.effectiveinstruments.status.instrument": "Current Instrument: %s",
     "command.effectiveinstruments.status.active": "Instrument Open: %s",
     "command.effectiveinstruments.status.targets": "Buffed Targets: %s",
     "command.effectiveinstruments.status.none": "No aura state for this player",
+    "command.effectiveinstruments.status.mobile_aura": "Mobile Aura: %s",
+    "command.effectiveinstruments.status.mobile_instrument": "Mobile Instrument: %s",
+    "command.effectiveinstruments.status.mobile_active": "Mobile Buff Active: %s",
+    "command.effectiveinstruments.status.mobile_targets": "Mobile Buffed Targets: %s",
+    "tooltip.effectiveinstruments.tier.stationary": "Stationary tier",
+    "tooltip.effectiveinstruments.tier.mobile": "Mobile tier",
+    "tooltip.effectiveinstruments.compat.immersive_melodies": "Immersive Melodies compatibility active",
+    "tooltip.effectiveinstruments.compat.immersive_melodies.limitations": "Mobile buffs fire for autoplay / selected-melody playback only. Free-play keyboard/MIDI mode is not supported in 1.3.0.",
     "narration.effectiveinstruments.aura_button": "%s — %s",
     "narration.effectiveinstruments.aura_button.selected": "%s — Selected — %s"
 }

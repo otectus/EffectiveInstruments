@@ -26,7 +26,7 @@ public class NoteActivityHandler {
                     ResourceLocation instrumentId = event.soundMeta().instrumentId();
                     AuraManager.PlayerAuraState state = AuraManager.getState(serverPlayer.getUUID());
                     if (state != null && state.getCurrentInstrumentId() == null && instrumentId != null) {
-                        AuraManager.onInstrumentOpenWithId(serverPlayer, instrumentId);
+                        AuraManager.onInstrumentIdReceived(serverPlayer, instrumentId);
                     }
                 }
 

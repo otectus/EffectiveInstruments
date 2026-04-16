@@ -51,17 +51,26 @@ minecraft {
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
 repositories {
-    flatDir { dir 'Dependencies' }
+    // Curse Maven — reproducible resolution of CurseForge-hosted dependencies.
+    // Scoped via content{includeGroup} so Gradle only queries it for the
+    // curse.maven group, keeping other resolutions fast.
+    maven {
+        name = 'Curse Maven'
+        url = 'https://cursemaven.com'
+        content { includeGroup 'curse.maven' }
+    }
 }
 
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
-    // Genshin Instruments - required dependency
-    implementation fg.deobf("genshinstrument:genshinstrument-1.20-${minecraft_version}:${genshinstruments_version}")
+    // Genshin Instruments — required dependency (Curse project 848761).
+    // File ID pinned in gradle.properties so version bumps touch one file.
+    implementation fg.deobf("curse.maven:genshin-instruments-${genshinstruments_project_id}:${genshinstruments_file_id}")
 
-    // Even More Instruments - optional soft dependency (compile only so we don't crash if absent)
-    compileOnly fg.deobf("evenmoreinstruments:evenmoreinstruments-1.20-${minecraft_version}:${evenmoreinstruments_version}")
+    // Even More Instruments — optional soft dependency (Curse project 898118).
+    // compileOnly so the mod loads even when EMI is absent at runtime.
+    compileOnly fg.deobf("curse.maven:even-more-instruments-${evenmoreinstruments_project_id}:${evenmoreinstruments_file_id}")
 
     // Testing
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'

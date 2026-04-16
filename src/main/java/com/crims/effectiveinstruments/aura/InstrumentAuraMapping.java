@@ -42,6 +42,7 @@ public final class InstrumentAuraMapping {
             Files.createDirectories(mappingFile.getParent());
 
             JsonObject root = new JsonObject();
+            root.addProperty(AuraSchema.FIELD, AuraSchema.CURRENT_VERSION);
             root.addProperty("_comment",
                     "Maps instrument IDs to aura configs. "
                             + "String value = single aura (default + only allowed). "
@@ -196,9 +197,28 @@ public final class InstrumentAuraMapping {
 
         if (root == null) return;
 
+        // schemaVersion — forward-compat gate. Missing field is treated as v1.
+        if (root.has(AuraSchema.FIELD)) {
+            int version;
+            try {
+                version = root.get(AuraSchema.FIELD).getAsInt();
+            } catch (Exception e) {
+                EffectiveInstrumentsMod.LOGGER.error(
+                        "instrument_auras.json has non-integer schemaVersion, ignoring file");
+                return;
+            }
+            if (version > AuraSchema.CURRENT_VERSION) {
+                EffectiveInstrumentsMod.LOGGER.error(
+                        "instrument_auras.json has schemaVersion {} which is newer than this mod supports ({}), ignoring file",
+                        version, AuraSchema.CURRENT_VERSION);
+                return;
+            }
+        }
+
         for (Map.Entry<String, JsonElement> entry : root.entrySet()) {
             String key = entry.getKey();
             if (key.startsWith("_")) continue;
+            if (AuraSchema.FIELD.equals(key)) continue;
 
             if (!ResourceLocation.isValidResourceLocation(key)) {
                 EffectiveInstrumentsMod.LOGGER.warn("Invalid instrument ID '{}' in mapping, skipping", key);
@@ -294,19 +314,37 @@ public final class InstrumentAuraMapping {
      */
     public static List<AuraPreset> getAllowedAuras(@Nullable ResourceLocation instrumentId) {
         if (instrumentId == null) {
-            return AuraRegistry.getEnabledPresets();
+            return filterForSelector(AuraRegistry.getEnabledPresets());
         }
 
         InstrumentAuraConfig config = MAPPINGS.get(instrumentId);
         if (config == null) {
-            return AuraRegistry.getEnabledPresets();
+            return filterForSelector(AuraRegistry.getEnabledPresets());
         }
 
         List<AuraPreset> result = new ArrayList<>();
         for (String auraId : config.allowedAuraIds()) {
             AuraRegistry.getById(auraId)
                     .filter(AuraPreset::enabled)
+                    .filter(p -> p.supports(BuffTier.STATIONARY))
+                    .filter(AuraPreset::showInSelector)
                     .ifPresent(result::add);
+        }
+        return result;
+    }
+
+    /**
+     * Keep only presets that the stationary selector UI is allowed to show:
+     * stationary-tier support + explicit {@code showInSelector=true}.
+     * Used when an instrument has no explicit allow-list so we still hide
+     * mobile-only passive presets from the overlay.
+     */
+    private static List<AuraPreset> filterForSelector(List<AuraPreset> input) {
+        List<AuraPreset> result = new ArrayList<>(input.size());
+        for (AuraPreset preset : input) {
+            if (preset.supports(BuffTier.STATIONARY) && preset.showInSelector()) {
+                result.add(preset);
+            }
         }
         return result;
     }

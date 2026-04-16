@@ -2,6 +2,7 @@ package com.crims.effectiveinstruments;
 
 import com.crims.effectiveinstruments.aura.AuraRegistry;
 import com.crims.effectiveinstruments.command.EICommands;
+import com.crims.effectiveinstruments.compat.immersivemelodies.ImmersiveMelodiesCompat;
 import com.crims.effectiveinstruments.config.EIClientConfig;
 import com.crims.effectiveinstruments.config.EIServerConfig;
 import com.crims.effectiveinstruments.network.EIPacketHandler;
@@ -50,6 +51,7 @@ public class EffectiveInstrumentsMod {
         event.enqueueWork(() -> {
             EIPacketHandler.register();
             AuraRegistry.load();
+            ImmersiveMelodiesCompat.init();
         });
     }
 

@@ -11,6 +11,7 @@ public class EIClientConfig {
     public static final ForgeConfigSpec.DoubleValue OVERLAY_SCALE;
     public static final ForgeConfigSpec.BooleanValue COMPACT_MODE;
     public static final ForgeConfigSpec.EnumValue<ParticlesMode> PARTICLES_MODE;
+    public static final ForgeConfigSpec.BooleanValue REDUCED_MOTION;
     public static final ForgeConfigSpec.ConfigValue<List<? extends String>> SCREEN_CLASS_ALLOWLIST;
 
     public enum ParticlesMode {
@@ -50,6 +51,11 @@ public class EIClientConfig {
         PARTICLES_MODE = builder
                 .comment("Particle effects when aura is active: ALL, MINIMAL, or NONE")
                 .defineEnum("particlesMode", ParticlesMode.ALL);
+        REDUCED_MOTION = builder
+                .comment(
+                        "Reduce aura particle motion (dampens velocity and pulse intensity).",
+                        "Useful for players sensitive to rapid visual motion.")
+                .define("reducedMotion", false);
         builder.pop();
 
         SPEC = builder.build();

@@ -30,12 +30,20 @@ public class InstrumentOpenC2SPacket {
             ServerPlayer sender = ctx.getSender();
             if (sender == null) return;
 
-            // Rate limit: 5 tick cooldown (~250ms)
+            // Trust boundary: this packet only *annotates* the current
+            // instrument ID and triggers default-aura auto-selection. The
+            // authoritative instrument-open flag is set exclusively by the
+            // server-side InstrumentOpenStateChangedEvent handler, so a
+            // spoofed packet cannot start applying effects — the aura tick
+            // requires the authoritative flag before doing anything.
             AuraManager.PlayerAuraState state = AuraManager.getState(sender.getUUID());
+            long now = sender.level().getGameTime();
+
+            // Rate limit: 5 tick cooldown (~250ms), tracked independently of
+            // aura selection so the two packet types cannot starve each other.
             if (state != null) {
-                long now = sender.level().getGameTime();
-                if (now - state.getLastSelectionTick() < 5) return;
-                state.markSelectionTime(now);
+                if (now - state.getLastOpenPacketTick() < 5) return;
+                state.markOpenPacketTime(now);
             }
 
             // Log suspicious instrument IDs from unknown namespaces
@@ -47,7 +55,7 @@ public class InstrumentOpenC2SPacket {
                         sender.getName().getString(), msg.instrumentId);
             }
 
-            AuraManager.onInstrumentOpenWithId(sender, msg.instrumentId);
+            AuraManager.onInstrumentIdReceived(sender, msg.instrumentId);
         });
         ctx.setPacketHandled(true);
     }
