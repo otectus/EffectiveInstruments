@@ -1,8 +1,15 @@
 # Effective Instruments
 
-**Play music. Empower allies.** Effective Instruments adds a magical aura system to [Genshin Instruments](https://www.curseforge.com/minecraft/mc-mods/genshin-instruments), letting musicians grant potion effects to nearby players and tamed pets while they perform. Every instrument has its own unique aura — pick up a Windsong Lyre and feel the breeze quicken your step, or pound the Glorious Drum to steel your allies for battle.
+**Play music. Empower allies. Or curse your enemies.** Effective Instruments adds a magical aura system to [Genshin Instruments](https://www.curseforge.com/minecraft/mc-mods/genshin-instruments), letting musicians grant potion effects to nearby players and tamed pets while they perform — or, if they pick the negative-polarity variant, inflict debuffs on nearby mobs. Every instrument has its own unique positive *and* offensive aura — pick up a Windsong Lyre and feel the breeze quicken your step (positive) or call down a howling gale that slows and weakens every foe in range (offensive).
 
-**New in 1.3.0:** Optional [Immersive Melodies](https://www.curseforge.com/minecraft/mc-mods/immersive-melodies) support! Walk around playing an IM instrument and receive lighter, passive buffs — no screen needed.
+**New in 1.4.x:**
+- **Offensive (negative) auras** — every instrument gets a mirrored debuff variant (Wither, Poison, Slowness, Blindness, etc.). Pick the red-bordered icon to swap polarities on the fly.
+- **Instrument durability** — instruments now wear out with use (per-instrument NBT durability) and can be repaired on an anvil. Vanilla-style durability bar under every instrument slot. Offensive auras wear instruments out faster.
+- **1-to-1 unique auras across 42 instruments.** Every GI, EMI (including all 16 note-block variants), and Immersive Melodies instrument has its own distinct positive + offensive pair — 84 unique auras shipped.
+- **Broad offensive targeting by default** — negative auras hit every mob in range except the musician, their own pets, and other players' pets. Admins can flip to fine-grained per-category control if preferred.
+- **Diagnostics command** — `/effectiveinstruments diagnose` surfaces every gate in the aura pipeline so "why isn't my aura firing?" has a one-command answer.
+
+**From 1.3.0:** Optional [Immersive Melodies](https://www.curseforge.com/minecraft/mc-mods/immersive-melodies) support! Walk around playing an IM instrument and receive lighter, passive buffs — no screen needed.
 
 ---
 
@@ -11,24 +18,24 @@
 ### Stationary Tier (Genshin Instruments / Even More Instruments)
 
 1. **Open any instrument** from Genshin Instruments (or Even More Instruments).
-2. **Your instrument's aura auto-selects.** Each instrument has a default aura mapped to it — no manual selection needed.
-3. **Start playing.** As long as you're actively playing notes, your aura applies its potion effects to all valid targets within range. Colored music note particles float outward to show the aura's reach.
-4. **Stop playing** and the aura deactivates after a short grace window (configurable, default 5 seconds). Effects will naturally expire on their own.
-5. **Close the instrument** and the aura clears. Open the same instrument again and it remembers your last selection for that session.
-
-If an instrument has multiple allowed auras, use the selector buttons in the top-right corner of the instrument screen to switch between them.
+2. **Your instrument's default positive aura auto-selects.** Each instrument has a default aura mapped to it — no manual selection needed.
+3. **Play a single note and the aura applies immediately** to all valid targets in range. Effects refresh as you keep playing; colored music note particles float outward to show the aura's reach.
+4. **Pick the red-bordered icon** in the top-right to switch to the instrument's offensive variant. Non-ambient particles on affected mobs show the debuff landed.
+5. **Stop playing** and the aura deactivates after a short grace window (configurable, default 5 seconds). Effects naturally expire.
+6. **Close the instrument** and the aura clears. Open the same instrument again and it remembers your last selection for that session.
 
 ### Mobile Tier (Immersive Melodies — optional)
 
 When [Immersive Melodies](https://www.curseforge.com/minecraft/mc-mods/immersive-melodies) is installed alongside Effective Instruments:
 
-1. **Hold an IM instrument** and start a melody (autoplay).
-2. **Walk around freely** — a passive aura buff applies to you and nearby allies every pulse (default: once per second).
+1. **Hold an IM instrument** and start a melody (autoplay) or use free-play mode.
+2. **Walk around freely** — a passive aura buff applies to you and nearby allies every pulse (default: once per second). Colored music notes float around the musician while the aura is active.
 3. **Pause or switch instruments** — effects linger briefly then clear.
+4. **Pick the red-bordered icon** to swap to the mobile-tier offensive aura for the held instrument.
 
 Mobile auras are deliberately lighter than stationary ones (single effect, shorter range and duration) for balance. If both tiers would apply to the same player, the stationary tier takes precedence by default.
 
-> **Note:** Mobile buffs activate during autoplay / selected-melody playback only. Free-play keyboard/MIDI mode is not yet supported.
+> **Free-play support shipped in 1.4.3.** Opening the IM screen is enough to activate the aura — no autoplay required. (Durability is only charged during autoplay / actual note playback, not while browsing the melody list.)
 
 ---
 
@@ -91,7 +98,7 @@ Every aura is defined by a simple JSON file in your config folder:
 config/effective_instruments/auras/
 ```
 
-On first launch, the mod generates 26 default aura JSON files (15 stationary + 11 mobile) and a `_README.txt` reference guide. From there, you have full control:
+On first launch, the mod generates 84 default aura JSON files (31 stationary positive + 31 stationary offensive + 11 mobile positive + 11 mobile offensive) and a `_README.txt` reference guide. From there, you have full control:
 
 - **Edit** any default aura — change its effects, duration, radius, color, name, or description
 - **Disable** an aura by setting `"enabled": false` — it stays on disk but won't appear in-game
@@ -186,6 +193,9 @@ Use `/effectiveinstruments reload` to apply changes to either mapping without re
 |---|---|---|
 | `/effectiveinstruments reload` | OP (level 2) | Reload all aura presets and instrument mappings (stationary + mobile) |
 | `/effectiveinstruments status [player]` | OP (level 2) | Show a player's current aura state (both tiers when IM is present) |
+| `/effectiveinstruments durability {get\|set <n>\|repair}` | OP (level 2) | Inspect or edit held instrument durability |
+| `/effectiveinstruments diagnose` | Everyone | Dump pipeline state (why isn't my aura firing?) |
+| `/effectiveinstruments reset-mappings` | OP (level 2) | Delete + regenerate the instrument-aura mapping from the canonical 1-to-1 table |
 | `/effectiveinstruments help` | Everyone | Print config location and command summary |
 
 ---

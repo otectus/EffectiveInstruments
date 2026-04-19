@@ -1,6 +1,7 @@
 package com.crims.effectiveinstruments.client.widget;
 
 import com.crims.effectiveinstruments.aura.AuraPreset;
+import com.crims.effectiveinstruments.aura.Polarity;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -49,22 +50,53 @@ public class AuraButtonWidget extends AbstractWidget {
         }
         guiGraphics.fill(getX(), getY(), getX() + width, getY() + height, bgColor);
 
-        // Border
-        int borderColor = selected ? 0xFFFFFFFF : isHovered ? 0xFFAAAAAA : 0xFF666666;
+        // Border — offensive (negative-polarity) presets get a red tint so they're
+        // visually distinct from support auras without needing new textures.
+        boolean offensive = preset.polarity() == Polarity.NEGATIVE;
+        int borderColor;
+        if (offensive) {
+            borderColor = selected ? 0xFFFF5555 : isHovered ? 0xFFCC3333 : 0xFF882222;
+        } else {
+            borderColor = selected ? 0xFFFFFFFF : isHovered ? 0xFFAAAAAA : 0xFF666666;
+        }
         guiGraphics.fill(getX(), getY(), getX() + width, getY() + 1, borderColor);
         guiGraphics.fill(getX(), getY() + height - 1, getX() + width, getY() + height, borderColor);
         guiGraphics.fill(getX(), getY(), getX() + 1, getY() + height, borderColor);
         guiGraphics.fill(getX() + width - 1, getY(), getX() + width, getY() + height, borderColor);
 
         // Icon texture centered — swap to selected variant when active, or letter fallback
+        boolean iconRendered = false;
         if (hasIconTexture) {
             int iconSize = Math.min(16, width - 2);
             int iconX = getX() + (width - iconSize) / 2;
             int iconY = getY() + (height - iconSize) / 2;
             @Nullable ResourceLocation selectedIcon = preset.selectedIconTexture();
             ResourceLocation icon = (selected && selectedIcon != null) ? selectedIcon : preset.iconTexture();
-            guiGraphics.blit(icon, iconX, iconY, 0, 0, iconSize, iconSize, iconSize, iconSize);
-        } else {
+            // Resource existence check — blit() doesn't throw on missing textures,
+            // it renders the missing-texture magenta/black square. That's exactly
+            // what the user was seeing for custom aura JSONs referencing PNGs
+            // we don't ship. Pre-flight the lookup so we can fall back to the
+            // letter renderer instead.
+            boolean resourcePresent = false;
+            try {
+                resourcePresent = Minecraft.getInstance()
+                        .getResourceManager()
+                        .getResource(icon)
+                        .isPresent();
+            } catch (Throwable ignored) {
+                // Some Minecraft versions throw on malformed resource IDs — still
+                // want to land in the letter fallback rather than crash.
+            }
+            if (resourcePresent) {
+                try {
+                    guiGraphics.blit(icon, iconX, iconY, iconSize, iconSize, 0.0f, 0.0f, 16, 16, 16, 16);
+                    iconRendered = true;
+                } catch (Throwable t) {
+                    iconRendered = false;
+                }
+            }
+        }
+        if (!iconRendered) {
             // Fallback: render first letter of display name
             Font font = Minecraft.getInstance().font;
             String name = preset.displayName().getString();
@@ -79,6 +111,10 @@ public class AuraButtonWidget extends AbstractWidget {
         if (isHovered) {
             List<Component> tooltipLines = new ArrayList<>();
             tooltipLines.add(preset.displayName());
+            if (offensive) {
+                tooltipLines.add(Component.literal("Offensive Aura")
+                        .withStyle(net.minecraft.ChatFormatting.RED));
+            }
             tooltipLines.add(preset.description());
 
             // Effect list with Roman numeral levels

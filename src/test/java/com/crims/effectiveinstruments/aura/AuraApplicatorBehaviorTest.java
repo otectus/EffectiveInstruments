@@ -151,14 +151,22 @@ class AuraApplicatorBehaviorTest {
     // --- Targeting profile shape ----------------------------------------------
 
     @Test
-    void targetingProfileHoldsAllFourKnobs() {
-        // Freezes the record shape. Mobile and stationary tiers each construct one
-        // per tick — if someone adds a fifth knob without updating both tiers,
-        // call sites break at compile time rather than silently drifting.
-        TargetingProfile p = new TargetingProfile(true, false, true, 32);
-        assertTrue(p.allowSelf());
-        assertFalse(p.includeOtherPlayers());
-        assertTrue(p.includeTamedPets());
+    void targetingProfileHoldsCategorySetAndCapAndPolarity() {
+        // Freezes the 1.4.1 record shape. Musician + own-pet inclusion is polarity-
+        // enforced in AuraApplicator and is NOT exposed on the profile — every
+        // other category flows through the allowed-categories set.
+        java.util.EnumSet<com.crims.effectiveinstruments.aura.EntityCategory> allowed =
+                java.util.EnumSet.of(
+                        com.crims.effectiveinstruments.aura.EntityCategory.OTHER_PLAYER,
+                        com.crims.effectiveinstruments.aura.EntityCategory.VILLAGER);
+        TargetingProfile p = new TargetingProfile(allowed, 32, false);
         assertEquals(32, p.maxTargetsPerTick());
+        assertFalse(p.offensive());
+        assertTrue(p.allowedCategories().contains(
+                com.crims.effectiveinstruments.aura.EntityCategory.OTHER_PLAYER));
+        assertTrue(p.allowedCategories().contains(
+                com.crims.effectiveinstruments.aura.EntityCategory.VILLAGER));
+        assertFalse(p.allowedCategories().contains(
+                com.crims.effectiveinstruments.aura.EntityCategory.HOSTILE_MOB));
     }
 }

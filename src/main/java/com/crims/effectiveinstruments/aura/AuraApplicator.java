@@ -8,14 +8,11 @@ import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.TamableAnimal;
-import net.minecraft.world.entity.animal.horse.AbstractHorse;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -42,14 +39,13 @@ public final class AuraApplicator {
     /**
      * Apply an aura's effects to all targets in range, updating {@code affectedTargets}
      * with the per-entity effect set so a later {@link #clear} call can strip only what
-     * we applied. This is the exact behavior that used to live in
-     * {@code AuraManager.applyAuraEffects}.
+     * we applied.
      *
      * @param source          the musician
      * @param aura            preset whose effects are applied
      * @param radius          pre-resolved radius in blocks (tiers resolve their own defaults)
      * @param durationTicks   pre-resolved effect duration in ticks
-     * @param profile         targeting knobs (self/other-players/pets/cap)
+     * @param profile         per-category inclusion + cap + polarity flag
      * @param affectedTargets per-entity-ID map of effects we applied, owned by the caller
      */
     public static void apply(
@@ -61,11 +57,12 @@ public final class AuraApplicator {
             Map<Integer, Set<MobEffect>> affectedTargets
     ) {
         List<LivingEntity> targets = gatherTargets(source, radius, profile);
+        boolean offensive = aura.isOffensive();
         for (LivingEntity target : targets) {
             Set<MobEffect> applied = affectedTargets
                     .computeIfAbsent(target.getId(), k -> new HashSet<>());
             for (AuraPreset.EffectEntry entry : aura.effects()) {
-                if (applyEffectSafely(target, entry.effect(), entry.amplifier(), durationTicks)) {
+                if (applyEffectSafely(target, entry.effect(), entry.amplifier(), durationTicks, offensive)) {
                     applied.add(entry.effect());
                 }
             }
@@ -74,10 +71,12 @@ public final class AuraApplicator {
 
     /**
      * Strip effects matching {@code oldAura} from all tracked targets.
-     * Only removes effects that look like ours: ambient + matching amplifier +
-     * remaining duration ≤ {@code maxExpectedDuration}. Stronger or longer effects
-     * from other sources are preserved. This is the exact behavior that used to
-     * live in {@code AuraManager.clearPreviousAuraEffects}.
+     * Only removes effects that look like ours: matching ambient polarity +
+     * matching amplifier + remaining duration ≤ {@code maxExpectedDuration}.
+     * The ambient check is polarity-aware — positive auras apply with
+     * {@code ambient=true}, offensive auras with {@code ambient=false}, so
+     * the strip-only-our-effects contract still holds on both sides. Stronger
+     * or longer effects from other sources are preserved.
      */
     public static void clear(
             ServerLevel level,
@@ -87,11 +86,11 @@ public final class AuraApplicator {
     ) {
         if (affectedTargets.isEmpty() || oldAura == null) return;
 
-        // Build a map of effect -> amplifier for the old aura so we only strip ours
         Map<MobEffect, Integer> ourEffects = new HashMap<>();
         for (AuraPreset.EffectEntry entry : oldAura.effects()) {
             ourEffects.put(entry.effect(), entry.amplifier());
         }
+        boolean expectAmbient = !oldAura.isOffensive();
 
         for (Map.Entry<Integer, Set<MobEffect>> entry : affectedTargets.entrySet()) {
             Entity entity = level.getEntity(entry.getKey());
@@ -104,8 +103,8 @@ public final class AuraApplicator {
                 MobEffectInstance current = living.getEffect(effect);
                 if (current == null) continue;
 
-                // Only remove if the effect looks like ours: ambient + matching amplifier + plausible duration
-                if (current.isAmbient() && current.getAmplifier() == ourAmplifier
+                if (current.isAmbient() == expectAmbient
+                        && current.getAmplifier() == ourAmplifier
                         && current.getDuration() <= maxExpectedDuration) {
                     living.removeEffect(effect);
                 }
@@ -115,65 +114,80 @@ public final class AuraApplicator {
         affectedTargets.clear();
     }
 
+    /**
+     * Single-loop unified target gatherer. Walks every LivingEntity in the AABB
+     * once, classifies each via {@link EntityCategory#classify}, and includes it
+     * only if the profile's category set admits it. MUSICIAN and OWN_PET are
+     * hard-wired by polarity (positive includes, offensive excludes) regardless
+     * of the profile's category set — this is the contract the v1.4.1 design
+     * promises the user.
+     *
+     * <p>Ordering: the targets list is built in category priority order
+     * (musician → own pets → other players → other players' pets → villagers →
+     * iron golems → passive → hostile) so a small cap still covers the
+     * intuitively-important targets first. Inside each category, order is
+     * whatever {@code level.getEntities} returns (effectively distance-ish).
+     */
     private static List<LivingEntity> gatherTargets(
             ServerPlayer source, int radius, TargetingProfile profile
     ) {
         int cap = profile.maxTargetsPerTick();
-        List<LivingEntity> targets = new ArrayList<>();
+        if (cap <= 0) return List.of();
+
         AABB box = source.getBoundingBox().inflate(radius);
+        double radiusSq = (double) radius * radius;
 
-        // Self (always first — guarantees the musician benefits even at low caps)
-        if (profile.allowSelf()) {
-            targets.add(source);
-            if (targets.size() >= cap) return targets;
+        // Bucket by category first so we can emit in priority order.
+        EnumMap<EntityCategory, List<LivingEntity>> buckets = new EnumMap<>(EntityCategory.class);
+        for (EntityCategory c : EntityCategory.values()) {
+            buckets.put(c, new ArrayList<>());
         }
 
-        // Other players
-        if (profile.includeOtherPlayers()) {
-            for (Player other : source.serverLevel().getEntitiesOfClass(Player.class, box)) {
-                if (other != source && source.distanceToSqr(other) <= (double) radius * radius) {
-                    targets.add(other);
-                    if (targets.size() >= cap) return targets;
-                }
+        // Source is always a candidate for MUSICIAN; ensure we don't skip it if
+        // it sits outside level.getEntities(source, box) (it typically does
+        // because the signature excludes the source entity).
+        buckets.get(EntityCategory.MUSICIAN).add(source);
+
+        for (Entity entity : source.serverLevel().getEntities(source, box)) {
+            if (!(entity instanceof LivingEntity living)) continue;
+            if (source.distanceToSqr(entity) > radiusSq) continue;
+
+            EntityCategory cat = EntityCategory.classify(source, entity, cachedPetAllowlist);
+            buckets.get(cat).add(living);
+        }
+
+        List<LivingEntity> out = new ArrayList<>();
+
+        // MUSICIAN and OWN_PET: polarity-enforced, never config-gated.
+        if (!profile.offensive()) {
+            for (LivingEntity e : buckets.get(EntityCategory.MUSICIAN)) {
+                out.add(e);
+                if (out.size() >= cap) return out;
+            }
+            for (LivingEntity e : buckets.get(EntityCategory.OWN_PET)) {
+                out.add(e);
+                if (out.size() >= cap) return out;
             }
         }
+        // Offensive path silently drops MUSICIAN + OWN_PET buckets.
 
-        // Tamed pets
-        if (profile.includeTamedPets()) {
-            Set<ResourceLocation> extraPetTypes = cachedPetAllowlist;
-
-            for (Entity entity : source.serverLevel().getEntities(source, box)) {
-                if (!(entity instanceof LivingEntity living)) continue;
-                if (source.distanceToSqr(entity) > (double) radius * radius) continue;
-
-                // TamableAnimal (wolf, cat, parrot, etc.)
-                if (entity instanceof TamableAnimal tamable
-                        && tamable.isTame()
-                        && source.getUUID().equals(tamable.getOwnerUUID())) {
-                    targets.add(living);
-                    if (targets.size() >= cap) return targets;
-                    continue;
-                }
-
-                // AbstractHorse (horse, donkey, mule, llama)
-                if (entity instanceof AbstractHorse horse
-                        && horse.isTamed()
-                        && source.getUUID().equals(horse.getOwnerUUID())) {
-                    targets.add(living);
-                    if (targets.size() >= cap) return targets;
-                    continue;
-                }
-
-                // Extra pet types from config
-                ResourceLocation typeId = ForgeRegistries.ENTITY_TYPES.getKey(entity.getType());
-                if (typeId != null && extraPetTypes.contains(typeId)) {
-                    targets.add(living);
-                    if (targets.size() >= cap) return targets;
-                }
+        EntityCategory[] configGated = {
+                EntityCategory.OTHER_PLAYER,
+                EntityCategory.OTHER_PLAYER_PET,
+                EntityCategory.VILLAGER,
+                EntityCategory.IRON_GOLEM,
+                EntityCategory.PASSIVE_MOB,
+                EntityCategory.HOSTILE_MOB,
+        };
+        Set<EntityCategory> allowed = profile.allowedCategories();
+        for (EntityCategory cat : configGated) {
+            if (!allowed.contains(cat)) continue;
+            for (LivingEntity e : buckets.get(cat)) {
+                out.add(e);
+                if (out.size() >= cap) return out;
             }
         }
-
-        return targets;
+        return out;
     }
 
     /**
@@ -181,10 +195,15 @@ public final class AuraApplicator {
      * {@link com.crims.effectiveinstruments.config.OverwritePolicy}. Never removes
      * effects we didn't apply; cleanup is the job of {@link #clear}.
      *
+     * <p>Positive auras use {@code ambient=true} so they produce subtle particles
+     * on friendly targets. Offensive auras use {@code ambient=false} so hostile
+     * mobs display normal (visible) particle plumes — users need a visual cue
+     * that the debuff landed, otherwise offensive auras feel broken.
+     *
      * @return true if the effect was actually applied
      */
     static boolean applyEffectSafely(
-            LivingEntity target, MobEffect effect, int amplifier, int duration
+            LivingEntity target, MobEffect effect, int amplifier, int duration, boolean offensive
     ) {
         MobEffectInstance existing = target.getEffect(effect);
         com.crims.effectiveinstruments.config.OverwritePolicy policy =
@@ -194,9 +213,9 @@ public final class AuraApplicator {
         }
         target.addEffect(new MobEffectInstance(
                 effect, duration, amplifier,
-                true,   // ambient (subtle particles)
-                true,   // visible
-                true    // show icon
+                !offensive, // ambient: true for positive (subtle), false for offensive (visible particles)
+                true,       // visible
+                true        // show icon
         ));
         return true;
     }

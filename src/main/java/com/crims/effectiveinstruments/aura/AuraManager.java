@@ -65,7 +65,12 @@ public class AuraManager {
         }
 
         boolean isActive(long currentGameTime) {
-            if (selectedAura == null || !instrumentOpen) return false;
+            if (selectedAura == null) return false;
+            // 1.4.7: removed the `!instrumentOpen` gate. Recent notes are the
+            // authoritative signal of "player is actively musicianing"; the
+            // screen-open flag is redundant and caused the aura to immediately
+            // deactivate when users closed the screen to observe effects. The
+            // note-window (default 5s) provides a natural linger.
             long window = EIServerConfig.NOTE_WINDOW_TICKS.get();
             if ((currentGameTime - lastNoteGameTime) > window) return false;
             // Activation threshold: require at least N notes in the sliding window.
@@ -93,6 +98,31 @@ public class AuraManager {
     public static void onNotePlayed(ServerPlayer player) {
         PlayerAuraState state = getOrCreate(player.getUUID());
         state.recordNote(player.level().getGameTime());
+        // 1.4.7: ensure the player's in the tick-loop even if we missed the
+        // InstrumentOpenStateChangedEvent for some reason (old worlds, modded
+        // compat hiccups). onNotePlayed is a strong signal they're actually
+        // playing, which is the whole point of activeMusicians.
+        activeMusicians.add(player.getUUID());
+    }
+
+    /**
+     * Apply the player's currently-selected aura to nearby targets right now.
+     * Called on every note played (stationary tier) so the visual + mechanical
+     * effect lands within milliseconds of the first note, not on the next tick.
+     * No-ops cleanly if the player has no state, no selection, no active notes,
+     * or the aura's master gate is off. Does NOT spawn particles — those stay
+     * on the tick-scheduled path to avoid per-note particle spam.
+     */
+    public static void applyAuraNow(ServerPlayer player) {
+        PlayerAuraState state = PLAYER_STATES.get(player.getUUID());
+        if (state == null) return;
+        AuraPreset aura = state.selectedAura;
+        if (aura == null) return;
+        long gameTime = player.level().getGameTime();
+        if (!state.isActive(gameTime)) return;
+        Optional<AuraPreset> current = AuraRegistry.getById(aura.id());
+        if (current.isEmpty() || !current.get().enabled()) return;
+        applyAuraEffects(player, aura);
     }
 
     /**
@@ -196,6 +226,11 @@ public class AuraManager {
             if (debug) {
                 activeCount++;
                 totalTargetCount += state.getAffectedTargetCount();
+                EffectiveInstrumentsMod.LOGGER.info(
+                        "[EI debug] aura={} offensive={} targets={} player={}",
+                        aura.id(), aura.isOffensive(),
+                        state.getAffectedTargetCount(),
+                        player.getName().getString());
             }
         }
 
@@ -208,19 +243,17 @@ public class AuraManager {
     }
 
     private static void applyAuraEffects(ServerPlayer source, AuraPreset aura) {
+        if (aura.isOffensive() && !EIServerConfig.OFFENSIVE_AURAS_ENABLED.get()) {
+            // Master kill switch — treat as if the preset doesn't exist at the apply stage.
+            return;
+        }
         int radius = aura.getEffectiveRadius();
         int duration = aura.getEffectiveDuration();
         PlayerAuraState state = getOrCreate(source.getUUID());
-        AuraApplicator.apply(source, aura, radius, duration, stationaryProfile(), state.affectedTargets);
-    }
-
-    private static TargetingProfile stationaryProfile() {
-        return new TargetingProfile(
-                EIServerConfig.ALLOW_SELF_BUFF.get(),
-                EIServerConfig.INCLUDE_OTHER_PLAYERS.get(),
-                EIServerConfig.INCLUDE_TAMED_PETS.get(),
-                EIServerConfig.MAX_TARGETS_PER_TICK.get()
-        );
+        TargetingProfile profile = aura.isOffensive()
+                ? TargetingProfiles.offensive()
+                : TargetingProfiles.positive();
+        AuraApplicator.apply(source, aura, radius, duration, profile, state.affectedTargets);
     }
 
     /**
@@ -245,8 +278,18 @@ public class AuraManager {
     }
 
     private static void spawnAuraParticles(ServerPlayer source, AuraPreset aura) {
+        spawnAuraNotes(source, aura, aura.getEffectiveRadius());
+    }
+
+    /**
+     * Spawn the aura-note particle plume around {@code source}. Shared entry
+     * point for the stationary tier ({@link #spawnAuraParticles}) and the
+     * mobile tier (Immersive Melodies). Caller supplies the radius because
+     * the mobile tier uses a shorter, config-driven radius distinct from
+     * {@link AuraPreset#getEffectiveRadius()}.
+     */
+    public static void spawnAuraNotes(ServerPlayer source, AuraPreset aura, int radius) {
         ServerLevel level = source.serverLevel();
-        int radius = aura.getEffectiveRadius();
         int color = aura.color();
         float r = ((color >> 16) & 0xFF) / 255f;
         float g = ((color >> 8) & 0xFF) / 255f;
@@ -276,6 +319,11 @@ public class AuraManager {
     public static boolean isActive(UUID playerId, long currentGameTime) {
         PlayerAuraState state = PLAYER_STATES.get(playerId);
         return state != null && state.isActive(currentGameTime);
+    }
+
+    /** Alias used by {@code /effectiveinstruments diagnose} — external readers shouldn't take a hard dep on {@link #isActive}'s package-private meaning. */
+    public static boolean isActiveTest(UUID playerId, long currentGameTime) {
+        return isActive(playerId, currentGameTime);
     }
 
     private static PlayerAuraState getOrCreate(UUID playerId) {

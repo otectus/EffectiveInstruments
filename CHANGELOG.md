@@ -4,6 +4,225 @@ All notable changes to Effective Instruments will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.8] - 2026-04-18
+
+### Fixed
+- **Duplicate offensive auras across instruments.** The effect-based
+  synthesis fallback used for custom positive auras returned the first
+  offensive with a matching primary effect — so every regen-primary
+  positive resolved to `echoes_of_decay`, etc. Renamed to
+  `findUnusedOffensiveByEffect(positive, taken)`; batched synthesis now
+  tracks already-claimed offensive ids and skips them.
+- Unique-assignment migration marker bumped `_v1_done` → `_v2_done` so
+  installs with lingering duplicates re-run the fix once.
+
+### Added
+- **`offensiveTargeting.includeAllNonPets`** server config (default
+  `true`). When true, offensive auras target every living entity in
+  range except the musician, their own pets, and other players' pets —
+  ignoring per-category knobs. Set to `false` for fine-grained control.
+- **`/effectiveinstruments reset-mappings`** (OP) — deletes the mapping
+  JSON + migration markers and regenerates from the canonical table.
+- **Load-time uniqueness audit.** Warns if any offensive aura appears on
+  more than one instrument after synthesis.
+- `/effectiveinstruments diagnose` now shows `includeAllNonPets` plus
+  every per-category offensive toggle in one line.
+
+## [1.4.7] - 2026-04-18
+
+### Fixed
+- **Durability depletion blocked in creative.** The 1.4.6 hardcoded
+  `player.getAbilities().instabuild` immunity made creative testing
+  opaque. Replaced with server config `durability.creativeImmunity`
+  (default `true`; flip to `false` to verify depletion in creative).
+- **Offensive auras felt non-functional.** Three compounding issues:
+  - `isActive` required `instrumentOpen=true`, so the aura deactivated
+    the instant the screen closed (before users could observe effects).
+    Removed the screen-open gate; recent notes alone keep it active.
+  - Tick-based apply had up to 500 ms latency. Added
+    `AuraManager.applyAuraNow(player)` called synchronously from
+    `NoteActivityHandler` — effects land within ms of the first note.
+  - Handler listened on abstract `InstrumentPlayedEvent<?>` only.
+    Forge EventBus dispatch to abstract-parent listeners is fragile;
+    now subscribes to concrete `NoteSoundPlayedEvent` +
+    `HeldNoteSoundPlayedEvent`.
+- `activeMusicians` is also populated on `onNotePlayed` (defensive
+  against a missed `InstrumentOpenStateChangedEvent`).
+
+### Added
+- **`/effectiveinstruments diagnose`** — dumps every gate in the aura
+  pipeline (held items + tracked state, current selection, `isActive`,
+  master toggles, activation thresholds). Answers "why isn't my aura
+  firing?" in one command.
+
+## [1.4.6] - 2026-04-18
+
+### Fixed
+- **IM selector icons render crisply.** 1.4.5 used the 9-arg `blit`
+  overload with mismatched source/dest sizes, producing wrap/clip
+  artifacts. 1.4.6 uses the 10-arg scaling overload (same as
+  `AuraButtonWidget`) and drops `IM_ICON_SIZE` to 16 for 1:1 scaling.
+- **Broken-message + low-durability throttles now per-player.** 1.4.5
+  used static `long`s shared across all players; one musician's
+  broken-spam suppressed another's warning. Now `Map<UUID, Long>` with
+  cleanup on logout.
+
+### Added
+- **Mobile-tier particle spawning.** Extracted
+  `AuraManager.spawnAuraNotes(player, aura, radius)` and wired it into
+  `ImmersiveMelodiesAuraHandler.tickPlayer` — musical notes now float
+  around the player while IM is playing.
+- **Creative-mode durability immunity** (matches vanilla tool
+  behavior). *Reworked into a config flag in 1.4.7.*
+- **Low-durability warning at ≤10% remaining.** Gold action-bar message
+  throttled once per second.
+- **Durability registry-lookup cache.** `InstrumentDurability` caches
+  `Item → Entry` in a `ConcurrentHashMap`, invalidated on config
+  reload. Drops an `ITEMS.getKey` from every slot-render frame.
+- **Aura-hint in instrument tooltip.** Dark-gray italic hint surfaces
+  the selector to players who pick up an instrument without docs.
+- **Action-bar hint** when an IM screen opens without a held IM
+  instrument — explains the silent-skip path.
+- **Preset existence-gates** extended to offensive + mobile writers,
+  so user-edited preset JSONs survive marker bumps uniformly.
+- **Removed dead reflection.** `AuraSelectorWidget.reattachTo` +
+  `onScreenRenderPre` were load-bearing in 1.4.4 for the widget-based
+  IM path; obsolete since 1.4.5 made IM render-event based.
+
+## [1.4.5] - 2026-04-18
+
+### Fixed
+- **IM overlay is now render-event based.** 1.4.4's widget-reattach
+  mechanism wasn't enough — on some installs the icons never appeared.
+  Root causes: IM rebuilds its widget list aggressively, and when the
+  held instrument has no mobile mapping the injector bailed silently.
+  1.4.5 draws icons directly in `ScreenEvent.Render.Post`, handles
+  clicks via `ScreenEvent.MouseButtonPressed.Pre`, and falls back to
+  showing all enabled mobile presets when the mapping is missing.
+
+### Added
+- **Durability bar on every instrument slot.** New
+  `InstrumentDurabilityBarDecorator` (client-only) registers an
+  `IItemDecorator` via `RegisterItemDecorationsEvent` for every item in
+  `genshinstrument`, `evenmoreinstruments`, `immersive_melodies`
+  namespaces. Vanilla-style 2×13px bar with green→yellow→red gradient.
+- **Base durability 4× higher.** Per-instrument defaults scaled
+  200→800, 300→1200, 400→1600. Global fallback `defaultMax` 300→1200.
+  Marker `_v2` forces one-time regen.
+
+## [1.4.4] - 2026-04-18
+
+### Fixed
+- **Icons flash-then-vanish on IM screens.** Added
+  `ScreenEvent.Render.Pre` handler that idempotently re-adds the
+  selector widget when IM wipes its children list.
+- **GI offensive aura selections silently dropped.**
+  `SelectAuraC2SPacket` stationary handler now accepts the exact
+  shipped polarity counterpart of the instrument's default even when
+  the allowed list predates 1.4.x.
+- **Offensive effects invisible on mobs.** Positive auras keep
+  `ambient=true` (subtle friendly-target particles); offensive auras
+  now set `ambient=false` so hostile mobs show normal particle plumes.
+- **Offensive-effect cleanup on aura switch.** `AuraApplicator.clear`
+  is now polarity-aware — strips `ambient=false` effects too.
+- **`earth_tremor` ⟷ `fathomless_pull` tuple duplicate** from 1.4.x.
+
+### Added
+- **1-to-1 unique auras.** Positive-stationary table expanded 15 → 31
+  (sixteen new ids: skyward_zephyr, rumbling_anthem, thunderous_cadence,
+  drumline_vigor, artisan_tempo, chiming_revival, starlit_grace,
+  fleetfoot_lilt, troubadour_march, craftwork_rondo, ironwright_anthem,
+  pasture_serenade, hearthlight_drone, pixel_pulse, wayfinders_reel,
+  bellwether_toll). Offensive-stationary table expanded 15 → 31
+  (sixteen mirrored ids). All 32 new icons generated via
+  `tools/gen_aura_icons.py`.
+- **One-shot 1-to-1 migration.** Marker
+  `.instrument_unique_assignment_v1_done` reassigns legacy duplicates
+  in the user's mapping while preserving custom entries.
+- **Uniqueness guard at `AuraRegistry.load()`.** Warn-level log lists
+  any preset ids that share a `(polarity, effects, amplifiers)` tuple.
+- **Atomic mapping-file writes** via `InstrumentAuraMapping.writeAtomically`
+  (writes to `.tmp` then `Files.move` with `ATOMIC_MOVE`).
+
+## [1.4.3] - 2026-04-18
+
+### Fixed
+- Icons gracefully fall back on missing textures —
+  `AuraButtonWidget` pre-checks the texture via the resource manager
+  before blit.
+- **Effect-based offensive pairing for custom user auras.**
+  `InstrumentAuraMapping.findOffensiveByEffect` maps a custom
+  positive's primary effect through the inverse table and finds a
+  shipped offensive whose first effect matches.
+- **Immersive Melodies GUI integration.** The aura selector now
+  appears on both IM screens (selection + free-play). Retired the old
+  `B` keybind + standalone `MobileAuraPickerScreen`.
+- **Free-play mobile auras apply.** IM's `playing=true` NBT flag isn't
+  set during free-play; `InstrumentOpenC2SPacket` grew
+  `mobileTier`/`close` fields so the server can activate the aura when
+  the IM screen opens. Durability is still only charged on playing=true
+  (browsing the melody list is free).
+
+## [1.4.2] - 2026-04-18
+
+### Fixed
+- **Icons regenerated.** 1.3.x-era positive icon PNGs were 224/256 px
+  transparent. Replaced with procedural flat-color + effect-specific
+  glyph icons via `tools/gen_aura_icons.py` (single source of truth).
+- **Mobile positive presets now have icons.** Mobile marker bumped
+  `_v2`; `AuraJsonLoader.writeMobileDefault` emits `icon`/`iconSelected`
+  + `showInSelector=true`.
+- **Loud diagnostics on synthesis failure.**
+  `synthesizeMissingOffensiveAllowed` logs the exact config file path
+  the user should delete to force regeneration.
+
+## [1.4.1] - 2026-04-18
+
+### Fixed
+- **Icon render fix** — `AuraButtonWidget.blit` passes fixed 16×16
+  source dimensions (no more missing-texture squares at compact scale)
+  and falls back to the letter renderer on any draw failure.
+- **Self-healing mappings.** `InstrumentAuraMapping.load` and
+  `MobileInstrumentAuraMapping.load` synthesize missing offensive
+  `allowed` entries in memory and opportunistically rewrite the JSON.
+  `AuraJsonLoader.healMissingOffensivePresets` regenerates any
+  offensive preset file that vanished from disk.
+
+### Added
+- **Offensive icons shipped.** 26 procedural PNGs generated by
+  `tools/gen_offensive_icons.py`. Offensive-defaults marker bumped
+  `_v2` so upgraded installs regenerate their JSONs once.
+- **Targeting contract tightened.** Positive auras *always* include the
+  musician and their own pets; offensive auras *never* do. Everything
+  else is per-polarity config. New `positiveTargeting` /
+  `offensiveTargeting` category toggles. Legacy `targeting.allowSelfBuff`
+  + `targeting.includeTamedPets` deprecated.
+- **`EntityCategory`** — centralized classifier.
+  `AuraApplicator.gatherTargets` replaced a two-branch implementation
+  with a single-loop classifier that buckets candidates and emits in
+  priority order.
+
+## [1.4.0] - 2026-04-18
+
+### Added
+- **Offensive auras.** Every instrument gains a second "negative
+  polarity" preset (Wither, Poison, Slowness, etc.). Target set
+  inverts: musician + pets spared, everything else in range debuffed.
+  Selector shows offensive presets with a red border.
+  Master switch: `offensiveTargeting.enabled`.
+- **Instrument durability.** Per-instrument NBT health under tag key
+  `EIDurability`. Fresh stacks assume full durability (lazy init).
+  Damage per note / per mobile pulse is config-driven; offensive auras
+  multiply the cost. Config file:
+  `config/effective_instruments/instrument_durability.json`.
+- **Broken-state gate.** At 0 durability,
+  `InstrumentPlayedEvent.setCanceled(true)` — no sound, no aura.
+  Open-events still pass but warn via chat.
+- **Anvil repair.** Two paths: combine two damaged copies (+12% max
+  bonus, vanilla-style) or consume the configured repair material for
+  `repairPerUnit` durability each.
+- **Admin subcommand.** `/effectiveinstruments durability {get|set <n>|repair}`.
+
 ## [1.3.0] - 2026-04-15
 
 ### Build & Distribution

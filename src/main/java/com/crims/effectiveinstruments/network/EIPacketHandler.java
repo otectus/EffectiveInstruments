@@ -11,7 +11,10 @@ import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 public class EIPacketHandler {
-    private static final String PROTOCOL_VERSION = "3";
+    // Bumped to "4" in 1.4.1 when SelectAuraC2SPacket grew the mobile
+    // instrument field. v1.4.0 clients can still connect but will see a
+    // mismatch warning at handshake.
+    private static final String PROTOCOL_VERSION = "4";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(EffectiveInstrumentsMod.MODID, "main"),
             () -> PROTOCOL_VERSION,

@@ -116,6 +116,11 @@ public class AuraSelectorWidget extends AbstractWidget {
         }
     }
 
+    // Note: 1.4.4 shipped reflection-based isAttachedTo/reattachTo for IM
+    // screens that rebuild their widget lists. 1.4.5 moved the IM path to
+    // direct render events (AuraOverlayInjector.onImScreenRenderPost) so the
+    // reattach machinery became dead. Removed in 1.4.6.
+
     @Override
     public void renderWidget(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         for (AuraButtonWidget btn : buttons) {

@@ -5,7 +5,9 @@ import com.crims.effectiveinstruments.aura.AuraManager;
 import com.crims.effectiveinstruments.aura.AuraPreset;
 import com.crims.effectiveinstruments.aura.MobileInstrumentAuraMapping;
 import com.crims.effectiveinstruments.aura.TargetingProfile;
+import com.crims.effectiveinstruments.aura.TargetingProfiles;
 import com.crims.effectiveinstruments.config.EIServerConfig;
+import com.crims.effectiveinstruments.durability.InstrumentDurability;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -41,6 +43,15 @@ public final class ImmersiveMelodiesAuraHandler {
         ResourceLocation instrumentId;
         long lastActiveTick = Long.MIN_VALUE;
         final Map<Integer, Set<MobEffect>> affectedTargets = new HashMap<>();
+        /**
+         * Instrument ID whose IM screen is currently open on this player's client.
+         * Set by {@link #onScreenOpened} / cleared by {@link #onScreenClosed} —
+         * lets the tick loop apply the mobile aura even when IM's
+         * {@code playing=true} NBT flag isn't set (free-play mode). Null means
+         * no IM screen is open for this player.
+         */
+        @Nullable
+        ResourceLocation screenOpenInstrumentId;
     }
 
     // --- Tick entry point (wired from InstrumentStateHandler) ---
@@ -68,15 +79,34 @@ public final class ImmersiveMelodiesAuraHandler {
             return;
         }
 
+        // Two valid activation paths for a mobile aura this pulse:
+        //   (1) player holds an IM instrument with playing=true NBT (IM autoplay).
+        //   (2) player has an IM screen open — tracked via onScreenOpened from
+        //       AuraOverlayInjector. Covers free-play mode where IM never sets
+        //       playing=true, which is what the user reported as "clicking the
+        //       picker does nothing".
         ImmersiveMelodiesCompat.HeldInstrument held =
                 ImmersiveMelodiesCompat.findActivePlayingStack(player);
+        ResourceLocation activeInstrumentId = held != null ? held.instrumentId() : state.screenOpenInstrumentId;
+        net.minecraft.world.item.ItemStack heldStack = held != null
+                ? held.stack()
+                : resolveHeldStackFor(player, activeInstrumentId);
 
-        if (held == null) {
+        if (activeInstrumentId == null) {
             handleIdle(level, state, gameTime);
             return;
         }
 
-        AuraPreset aura = MobileInstrumentAuraMapping.resolve(held.instrumentId());
+        // Broken-state gate: if the held stack's durability is 0, treat as idle
+        // so the aura expires and the player isn't rewarded for a broken instrument.
+        // IM's own sound pipeline is untouched — we don't try to block its audio.
+        if (heldStack != null && InstrumentDurability.isBroken(heldStack)) {
+            handleIdle(level, state, gameTime);
+            return;
+        }
+
+        AuraPreset aura = MobileInstrumentAuraMapping.resolveFor(
+                player.getServer(), player.getUUID(), activeInstrumentId);
         if (aura == null) {
             handleIdle(level, state, gameTime);
             return;
@@ -92,20 +122,71 @@ public final class ImmersiveMelodiesAuraHandler {
             );
         }
 
+        if (aura.isOffensive() && !EIServerConfig.OFFENSIVE_AURAS_ENABLED.get()) {
+            // Master kill switch — idle out instead of applying.
+            handleIdle(level, state, gameTime);
+            return;
+        }
+
         state.activeAura = aura;
-        state.instrumentId = held.instrumentId();
+        state.instrumentId = activeInstrumentId;
         state.lastActiveTick = gameTime;
 
         int radius = resolveMobileRadius(aura);
         int duration = aura.getEffectiveDuration();
+        TargetingProfile profile = aura.isOffensive()
+                ? TargetingProfiles.mobileOffensive()
+                : TargetingProfiles.mobilePositive();
         AuraApplicator.apply(
                 player,
                 aura,
                 radius,
                 duration,
-                mobileProfile(),
+                profile,
                 state.affectedTargets
         );
+
+        // Visual feedback: spawn the aura-note particle plume so the player
+        // can see the mobile aura is active. Matches the stationary tier's
+        // post-apply particle call — users otherwise saw zero visual signal
+        // that an IM instrument's aura was working.
+        AuraManager.spawnAuraNotes(player, aura, radius);
+
+        // Durability damage — one cost per successful pulse, polarity-aware.
+        // Only charges when the player is actually holding the instrument (held
+        // != null). Screen-open-only activation (e.g. browsing melody list in
+        // the menu) doesn't consume durability — matches the user intuition
+        // that durability tracks play, not browsing.
+        if (held != null && heldStack != null && EIServerConfig.DURABILITY_ENABLED.get()) {
+            int cost = EIServerConfig.DURABILITY_COST_PER_MOBILE_PULSE.get();
+            if (aura.isOffensive()) {
+                cost *= EIServerConfig.OFFENSIVE_DURABILITY_COST_MULT.get();
+            }
+            boolean brokeNow = InstrumentDurability.damage(heldStack, cost, player);
+            if (brokeNow) {
+                clearImmediate(level, state);
+            }
+        }
+    }
+
+    /**
+     * Screen-open-only path helper: find the matching held stack for the
+     * instrument whose IM screen is open. Used for the broken-state gate and
+     * (not currently) durability decrements. Returns null if the instrument
+     * isn't in either hand.
+     */
+    @Nullable
+    private static net.minecraft.world.item.ItemStack resolveHeldStackFor(
+            ServerPlayer player, @Nullable ResourceLocation instrumentId
+    ) {
+        if (instrumentId == null) return null;
+        for (net.minecraft.world.item.ItemStack stack : player.getHandSlots()) {
+            if (stack.isEmpty()) continue;
+            net.minecraft.resources.ResourceLocation itemId =
+                    net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+            if (instrumentId.equals(itemId)) return stack;
+        }
+        return null;
     }
 
     /**
@@ -145,7 +226,30 @@ public final class ImmersiveMelodiesAuraHandler {
         state.instrumentId = null;
     }
 
-    // --- Lifecycle hooks (wired from InstrumentStateHandler) ---
+    // --- Lifecycle hooks (wired from InstrumentStateHandler + InstrumentOpenC2SPacket) ---
+
+    /**
+     * Client reported that an IM screen opened. Records the instrument id on
+     * the mobile state; the next tick applies the aura even without
+     * {@code playing=true} on the stack. This is how free-play mode gets aura
+     * coverage — the user's "click the picker, nothing happens" complaint was
+     * exactly this path being missing.
+     */
+    public static void onScreenOpened(ServerPlayer player, ResourceLocation instrumentId) {
+        MobileAuraState state = STATES.computeIfAbsent(player.getUUID(), id -> new MobileAuraState());
+        state.screenOpenInstrumentId = instrumentId;
+        // Nudge lastActiveTick so a just-opened screen doesn't immediately go idle.
+        state.lastActiveTick = player.level().getGameTime();
+    }
+
+    /** Client reported that the IM screen closed — drop the screen-open flag. */
+    public static void onScreenClosed(ServerPlayer player, ResourceLocation instrumentId) {
+        MobileAuraState state = STATES.get(player.getUUID());
+        if (state == null) return;
+        if (instrumentId.equals(state.screenOpenInstrumentId)) {
+            state.screenOpenInstrumentId = null;
+        }
+    }
 
     /** Drop all per-player state. Called on logout. No effect-strip needed — the player is gone. */
     public static void onPlayerLogout(UUID playerId) {
@@ -164,14 +268,10 @@ public final class ImmersiveMelodiesAuraHandler {
 
     // --- Helpers ---
 
-    private static TargetingProfile mobileProfile() {
-        return new TargetingProfile(
-                EIServerConfig.MOBILE_ALLOW_SELF_BUFF.get(),
-                EIServerConfig.MOBILE_INCLUDE_OTHER_PLAYERS.get(),
-                EIServerConfig.MOBILE_INCLUDE_TAMED_PETS.get(),
-                EIServerConfig.MOBILE_MAX_TARGETS_PER_TICK.get()
-        );
-    }
+    // Mobile-tier profiles now live on TargetingProfiles — one source of truth
+    // for category inclusion across tiers. The old mobile-specific config keys
+    // (MOBILE_ALLOW_SELF_BUFF, MOBILE_INCLUDE_OTHER_PLAYERS, MOBILE_INCLUDE_TAMED_PETS)
+    // are deprecated; see EIServerConfig comments.
 
     /**
      * Resolve radius for a mobile preset. Mirrors the intent of

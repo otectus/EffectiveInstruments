@@ -23,12 +23,18 @@ public record AuraPreset(
         @Nullable ResourceLocation iconTexture,
         @Nullable ResourceLocation selectedIconTexture,
         Set<BuffTier> supportedTiers,
-        boolean showInSelector
+        boolean showInSelector,
+        Polarity polarity
 ) {
     public record EffectEntry(
             MobEffect effect,
             int amplifier
     ) {}
+
+    /** Convenience — true when this preset inflicts debuffs on foes. */
+    public boolean isOffensive() {
+        return polarity == Polarity.NEGATIVE;
+    }
 
     /**
      * Returns the effective radius for this aura.
@@ -79,7 +85,8 @@ public record AuraPreset(
                 defaultDurationTicks, radiusOverride, enabled, sortOrder,
                 iconTexture, selectedIconTexture,
                 EnumSet.of(BuffTier.STATIONARY),
-                true
+                true,
+                Polarity.POSITIVE
         );
     }
 }
