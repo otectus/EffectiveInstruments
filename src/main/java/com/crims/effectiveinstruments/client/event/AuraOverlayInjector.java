@@ -22,6 +22,7 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.ScreenEvent;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -64,6 +65,14 @@ public class AuraOverlayInjector {
 
     @Nullable
     private static AuraSelectorWidget selectorWidget = null;
+    /**
+     * 1.4.9 (RECS §3.9): explicit Screen reference for the stationary overlay.
+     * Replaces the {@code AuraSelectorWidget.parentScreen} field — the widget
+     * no longer holds a Screen reference, so the close handler tracks it here
+     * (parallel to {@link #imOverlayScreen} for the IM path).
+     */
+    @Nullable
+    private static Screen stationaryOverlayScreen = null;
     @Nullable
     private static String currentSelectedAuraId = null;
     @Nullable
@@ -137,8 +146,9 @@ public class AuraOverlayInjector {
         }
         allowed = InstrumentAuraMapping.getAllowedAuras(currentInstrumentId);
 
+        stationaryOverlayScreen = screen;
         selectorWidget = new AuraSelectorWidget(
-                screen,
+                screen.width,
                 allowed,
                 currentSelectedAuraId,
                 AuraOverlayInjector::onAuraSelected
@@ -189,9 +199,17 @@ public class AuraOverlayInjector {
         if (allowed.isEmpty()) {
             // Mapping might exist but have resolved to empty. Fall back to
             // every enabled mobile-tier preset so the UI is at least present.
+            // 1.4.9 (RECS §3.4): the per-instrument getAllowedAuras path
+            // intentionally bypasses showInSelector (offensive mobile presets
+            // ship with showInSelector=false but ARE selectable from the
+            // curated allow-list). The fallback here is a different surface —
+            // it's surfacing every mobile preset in the system, not a curated
+            // set — so we DO honor showInSelector to keep hidden user-custom
+            // presets out of the picker.
             allowed = new ArrayList<>();
             for (AuraPreset preset : AuraRegistry.getEnabledPresets()) {
-                if (preset.supports(com.crims.effectiveinstruments.aura.BuffTier.MOBILE)) {
+                if (preset.supports(com.crims.effectiveinstruments.aura.BuffTier.MOBILE)
+                        && preset.showInSelector()) {
                     allowed.add(preset);
                 }
             }
@@ -412,29 +430,58 @@ public class AuraOverlayInjector {
     @SubscribeEvent
     public static void onScreenClose(final ScreenEvent.Closing event) {
         Screen closed = event.getScreen();
-        boolean wasStationary = selectorWidget != null && closed == selectorWidget.parentScreen;
+        boolean wasStationary = stationaryOverlayScreen != null && closed == stationaryOverlayScreen;
         boolean wasImOverlay = imOverlayScreen != null && closed == imOverlayScreen;
         if (!wasStationary && !wasImOverlay) return;
 
+        clearOverlayState(/* notifyServer */ true);
+    }
+
+    /**
+     * Shared teardown for the IM + stationary overlay state. Persists the
+     * current selection into {@link #instrumentAuraOverrides} (or removes it
+     * for a deselect), optionally pings the server with the close packet for
+     * the mobile path, then clears every "currently active overlay" field.
+     */
+    private static void clearOverlayState(boolean notifyServer) {
         if (currentInstrumentId != null && currentSelectedAuraId != null) {
             instrumentAuraOverrides.put(currentInstrumentId, currentSelectedAuraId);
         } else if (currentInstrumentId != null) {
             instrumentAuraOverrides.remove(currentInstrumentId);
         }
-        // Notify server the screen closed so the mobile handler can enter
-        // its linger / idle path.
-        if (currentIsMobileTier && currentInstrumentId != null) {
+        if (notifyServer && currentIsMobileTier && currentInstrumentId != null) {
             EIPacketHandler.sendToServer(
                     new InstrumentOpenC2SPacket(currentInstrumentId, /* mobileTier */ true, /* close */ true)
             );
         }
         selectorWidget = null;
+        stationaryOverlayScreen = null;
         imOverlayScreen = null;
         imOverlayAllowed.clear();
         imOverlayRects.clear();
         currentSelectedAuraId = null;
         currentInstrumentId = null;
         currentIsMobileTier = false;
+    }
+
+    /**
+     * 1.4.9 (RECS §3.5): defensive cleanup pass. {@link ScreenEvent.Closing}
+     * is the only path that calls {@link #clearOverlayState} — but if a
+     * non-Closing screen swap happens (rare, but Forge has had bugs and other
+     * mods can swap screens via {@code Minecraft.setScreen} without firing
+     * Closing), the IM overlay state stays attached to a no-longer-rendered
+     * screen until next IM open. This tick listener catches that case so
+     * overlay state can never outlive its host.
+     */
+    @SubscribeEvent
+    public static void onClientTick(final TickEvent.ClientTickEvent event) {
+        if (event.phase != TickEvent.Phase.END) return;
+        Screen current = Minecraft.getInstance().screen;
+        if (imOverlayScreen != null && current != imOverlayScreen) {
+            // Server already moved on (or never knew). Don't ping it on close
+            // — that would just be noise — but locally release the state.
+            clearOverlayState(/* notifyServer */ false);
+        }
     }
 
     @SubscribeEvent
@@ -444,6 +491,7 @@ public class AuraOverlayInjector {
         currentInstrumentId = null;
         currentIsMobileTier = false;
         selectorWidget = null;
+        stationaryOverlayScreen = null;
         imOverlayScreen = null;
         imOverlayAllowed.clear();
         imOverlayRects.clear();

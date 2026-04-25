@@ -5,11 +5,13 @@ import com.crims.effectiveinstruments.command.EICommands;
 import com.crims.effectiveinstruments.compat.immersivemelodies.ImmersiveMelodiesCompat;
 import com.crims.effectiveinstruments.config.EIClientConfig;
 import com.crims.effectiveinstruments.config.EIServerConfig;
+import com.crims.effectiveinstruments.durability.InstrumentDurability;
 import com.crims.effectiveinstruments.network.EIPacketHandler;
 import com.crims.effectiveinstruments.particle.EIParticleTypes;
 import com.mojang.logging.LogUtils;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.server.ServerAboutToStartEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
@@ -38,8 +40,12 @@ public class EffectiveInstrumentsMod {
         ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, EIClientConfig.SPEC,
                 "effective_instruments/client.toml");
 
-        // Register command listener on FORGE bus
+        // Register Forge-bus listeners. ServerAboutToStartEvent is the earliest
+        // point at which the SERVER config spec is guaranteed to be loaded —
+        // any code that reads EIServerConfig.X.get() at common-setup time runs
+        // before that, so we defer config-dependent work to onServerAboutToStart.
         MinecraftForge.EVENT_BUS.addListener(this::onRegisterCommands);
+        MinecraftForge.EVENT_BUS.addListener(this::onServerAboutToStart);
 
         // Warn about old config files from before the subfolder migration
         checkOldConfigMigration();
@@ -50,9 +56,24 @@ public class EffectiveInstrumentsMod {
     private void commonSetup(final FMLCommonSetupEvent event) {
         event.enqueueWork(() -> {
             EIPacketHandler.register();
-            AuraRegistry.load();
+            // 1.4.9: only the JSON-loading half runs here. SERVER-config reads
+            // (durability default fallback, pet allowlist cache invalidation)
+            // are deferred to ServerAboutToStartEvent — see #1.2 in
+            // RECOMMENDATIONS.md. Forge SERVER configs are not loaded yet.
+            AuraRegistry.loadPresetsAndMappings();
             ImmersiveMelodiesCompat.init();
         });
+    }
+
+    private void onServerAboutToStart(final ServerAboutToStartEvent event) {
+        // SERVER-config-dependent tail of registry init. Runs once per world
+        // load (and again on /effectiveinstruments reload, which calls both
+        // halves). Order matters: refresh the registry's config-derived caches
+        // first, then flush InstrumentDurability so the next stack hover picks
+        // up the just-loaded DURABILITY_DEFAULT_MAX value.
+        AuraRegistry.refreshConfigDerived();
+        InstrumentDurability.invalidateEntryCache();
+        EIServerConfig.warnDeprecated();
     }
 
     private void onRegisterCommands(final RegisterCommandsEvent event) {

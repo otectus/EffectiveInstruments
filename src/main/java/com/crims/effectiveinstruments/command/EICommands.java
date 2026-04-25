@@ -160,6 +160,17 @@ public final class EICommands {
                         + " playerCreative=" + player.getAbilities().instabuild
         ).withStyle(ChatFormatting.GRAY), false);
 
+        // 1.4.9 (RECS §3.10): symmetric positive-targeting block. Without
+        // this, "my regen aura doesn't hit my ally" had no diagnostic surface.
+        source.sendSuccess(() -> Component.literal(
+                "Positive targeting: otherPlayers=" + EIServerConfig.POSITIVE_INCLUDE_OTHER_PLAYERS.get()
+                        + " otherPlayerPets=" + EIServerConfig.POSITIVE_INCLUDE_OTHER_PLAYER_PETS.get()
+                        + " villagers=" + EIServerConfig.POSITIVE_INCLUDE_VILLAGERS.get()
+                        + " ironGolems=" + EIServerConfig.POSITIVE_INCLUDE_IRON_GOLEMS.get()
+                        + " passive=" + EIServerConfig.POSITIVE_INCLUDE_PASSIVE_MOBS.get()
+                        + " hostile=" + EIServerConfig.POSITIVE_INCLUDE_HOSTILE_MOBS.get()
+        ).withStyle(ChatFormatting.GRAY), false);
+
         source.sendSuccess(() -> Component.literal(
                 "Offensive targeting: enabled=" + EIServerConfig.OFFENSIVE_AURAS_ENABLED.get()
                         + " allNonPets=" + EIServerConfig.OFFENSIVE_INCLUDE_ALL_NON_PETS.get()

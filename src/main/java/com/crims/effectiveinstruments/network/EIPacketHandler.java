@@ -14,6 +14,13 @@ public class EIPacketHandler {
     // Bumped to "4" in 1.4.1 when SelectAuraC2SPacket grew the mobile
     // instrument field. v1.4.0 clients can still connect but will see a
     // mismatch warning at handshake.
+    //
+    // TODO(1.5.0): bump to "5" when an actually-incompatible packet field
+    // is added (e.g. a new selection mode or persistence flag). 1.4.3-1.4.9
+    // additions (mobileTier, close, mobile rate-limit) are forward-compatible
+    // length-prefixed reads, so older clients silently degrade rather than
+    // reject — bumping today would surface the mismatch to users without an
+    // actual incompatibility to motivate it.
     private static final String PROTOCOL_VERSION = "4";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(EffectiveInstrumentsMod.MODID, "main"),

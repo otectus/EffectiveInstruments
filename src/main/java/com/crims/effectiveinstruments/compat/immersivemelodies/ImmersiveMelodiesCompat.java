@@ -26,9 +26,11 @@ import javax.annotation.Nullable;
  *   <li>The hot path (per-player per-pulse) avoids reflection.</li>
  * </ul>
  *
- * <p>Known limitation for 1.3.0: free-play keyboard input does NOT set
- * {@code playing=true}, so passive buffs only fire during autoplay / selected
- * melody playback. Revisit in 1.3.1 if an upstream IM hook lands.
+ * <p>Free-play coverage: this bridge only sees {@code playing=true} (autoplay
+ * + selected-melody playback). Free-play keyboard / MIDI input doesn't flip
+ * the NBT, so the screen-open path on
+ * {@link ImmersiveMelodiesAuraHandler#onScreenOpened} (1.4.3+) covers that
+ * case via the client-side {@code InstrumentOpenC2SPacket}.
  */
 public final class ImmersiveMelodiesCompat {
 

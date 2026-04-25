@@ -12,7 +12,33 @@ public final class AuraRegistry {
     private static List<AuraPreset> cachedEnabledPresets = List.of();
     private static boolean loaded = false;
 
+    /**
+     * Full registry refresh. Equivalent to running
+     * {@link #loadPresetsAndMappings()} followed by
+     * {@link #refreshConfigDerived()}. Used by {@code /effectiveinstruments
+     * reload} where the SERVER config is already available.
+     *
+     * <p>Boot-time callers must NOT use this — they don't have a loaded
+     * SERVER config yet and must call the two halves separately, with the
+     * config-derived half deferred to {@code ServerAboutToStartEvent}.
+     */
     public static void load() {
+        loadPresetsAndMappings();
+        refreshConfigDerived();
+    }
+
+    /**
+     * JSON-only initialization: preset directory scan, mapping files, and
+     * (config-independent) durability metadata. Safe at common-setup time —
+     * does not read any {@code EIServerConfig.X.get()} value.
+     *
+     * <p>Pairs with {@link #refreshConfigDerived()} which does the
+     * config-dependent tail. Splitting them was added in 1.4.9 (RECS §1.2)
+     * because Forge SERVER configs aren't loaded at common-setup, so any
+     * {@code IntValue.get()} call there either throws
+     * {@link IllegalStateException} or silently returns the spec default.
+     */
+    public static void loadPresetsAndMappings() {
         PRESETS.clear();
         ENABLED_IDS.clear();
 
@@ -20,11 +46,8 @@ public final class AuraRegistry {
         // Self-heal any offensive presets that got lost between installs (partial
         // first-run, manual deletion, etc.). If any are regenerated, reload so
         // they're picked up in this same call.
-        List<String> healed = AuraJsonLoader.healMissingOffensivePresets();
+        AuraJsonLoader.healMissingOffensivePresets();
         List<AuraPreset> all = AuraJsonLoader.loadAll();
-        if (!healed.isEmpty()) {
-            // Already regenerated above; loadAll just ran over them too.
-        }
         for (AuraPreset preset : all) {
             PRESETS.put(preset.id(), preset);
             if (preset.enabled()) {
@@ -51,9 +74,21 @@ public final class AuraRegistry {
 
         InstrumentDurabilityConfig.ensureDefaults();
         InstrumentDurabilityConfig.load();
-        com.crims.effectiveinstruments.durability.InstrumentDurability.invalidateEntryCache();
+    }
 
+    /**
+     * SERVER-config-dependent half of registry init. Must run AFTER
+     * {@link #loadPresetsAndMappings()} and AFTER the SERVER config is
+     * loaded ({@code ServerAboutToStartEvent} or later).
+     *
+     * <p>Refreshes the pet allowlist cache (reads
+     * {@link com.crims.effectiveinstruments.config.EIServerConfig#PET_ENTITY_ALLOWLIST})
+     * and flushes the durability entry cache so synthesized fallback entries
+     * pick up the now-loaded {@code DURABILITY_DEFAULT_MAX}.
+     */
+    public static void refreshConfigDerived() {
         AuraApplicator.invalidatePetAllowlistCache();
+        com.crims.effectiveinstruments.durability.InstrumentDurability.invalidateEntryCache();
     }
 
     public static void reload() {

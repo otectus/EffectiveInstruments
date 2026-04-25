@@ -1,5 +1,6 @@
 package com.crims.effectiveinstruments.config;
 
+import com.crims.effectiveinstruments.EffectiveInstrumentsMod;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.common.ForgeConfigSpec;
 
@@ -108,24 +109,21 @@ public class EIServerConfig {
 
         builder.comment(
                         "Legacy target selection settings (pre-1.4.1). Kept for backwards-compat with",
-                        "existing server.toml files. 'allowSelfBuff' and 'includeTamedPets' are now",
-                        "*ignored at runtime* — positive auras always cover the musician and their own",
-                        "pets, negative auras never do. A one-shot warning is logged on startup if",
-                        "either is set to the no-longer-honored value.")
+                        "existing server.toml files. The four toggles below are *ignored at runtime*.",
+                        "If any is set to a non-default value on startup the mod logs a one-shot",
+                        "deprecation warning. Slated for removal in 1.5.0.")
                 .push("targeting");
         ALLOW_SELF_BUFF = builder
-                .comment("DEPRECATED in 1.4.1 — ignored at runtime. Positive auras always include the musician.")
+                .comment("Deprecated since 1.4.1. Ignored at runtime; emits a deprecation warning on startup if non-default.")
                 .define("allowSelfBuff", true);
         INCLUDE_OTHER_PLAYERS = builder
-                .comment("DEPRECATED in 1.4.1 — moved to positiveTargeting.includeOtherPlayers. Still read as a migration default on first boot.")
+                .comment("Deprecated since 1.4.1. Ignored at runtime; emits a deprecation warning on startup if non-default. Replacement: positiveTargeting.includeOtherPlayers.")
                 .define("includeOtherPlayers", true);
         INCLUDE_TAMED_PETS = builder
-                .comment("DEPRECATED in 1.4.1 — ignored at runtime. Positive auras always include the musician's own pets.")
+                .comment("Deprecated since 1.4.1. Ignored at runtime; emits a deprecation warning on startup if non-default.")
                 .define("includeTamedPets", true);
         MAX_TARGETS_PER_TICK = builder
-                .comment(
-                        "DEPRECATED in 1.4.1 — moved to positiveTargeting.maxTargetsPerTick.",
-                        "Still honored as a fallback cap when the positive block is at its default.")
+                .comment("Deprecated since 1.4.1. Ignored at runtime; emits a deprecation warning on startup if non-default. Replacement: positiveTargeting.maxTargetsPerTick.")
                 .defineInRange("maxTargetsPerTick", 32, 1, 512);
         PET_ENTITY_ALLOWLIST = builder
                 .comment("Additional entity type IDs to treat as 'pets' beyond TamableAnimal/AbstractHorse. Still in effect.")
@@ -190,13 +188,13 @@ public class EIServerConfig {
                 .comment("Hard cap on buffed entities per mobile-tier musician per pulse.")
                 .defineInRange("maxTargetsPerTick", 16, 1, 256);
         MOBILE_ALLOW_SELF_BUFF = builder
-                .comment("Whether the mobile-tier musician receives their own effects")
+                .comment("Deprecated since 1.4.1. Ignored at runtime; emits a deprecation warning on startup if non-default. Mobile targeting now derives from positiveTargeting/offensiveTargeting via TargetingProfiles.")
                 .define("allowSelfBuff", true);
         MOBILE_INCLUDE_OTHER_PLAYERS = builder
-                .comment("Whether other players in range receive mobile-tier effects")
+                .comment("Deprecated since 1.4.1. Ignored at runtime; emits a deprecation warning on startup if non-default. Replacement: positiveTargeting.includeOtherPlayers.")
                 .define("includeOtherPlayers", true);
         MOBILE_INCLUDE_TAMED_PETS = builder
-                .comment("Whether tamed animals in range receive mobile-tier effects (off by default — passive, weaker tier)")
+                .comment("Deprecated since 1.4.1. Ignored at runtime; emits a deprecation warning on startup if non-default.")
                 .define("includeTamedPets", false);
         SUPPRESS_MOBILE_WHEN_STATIONARY_ACTIVE = builder
                 .comment("If true, a player's active stationary aura suppresses the mobile tier for that player.")
@@ -220,13 +218,13 @@ public class EIServerConfig {
                         "control via the include* knobs.")
                 .define("includeAllNonPets", true);
         OFFENSIVE_ALLOW_SELF = builder
-                .comment("DEPRECATED in 1.4.1 — ignored at runtime. Offensive auras never hit the musician.")
+                .comment("Deprecated since 1.4.1. Ignored at runtime; emits a deprecation warning on startup if non-default. Offensive auras never hit the musician.")
                 .define("allowSelf", false);
         OFFENSIVE_INCLUDE_OTHER_PLAYERS = builder
                 .comment("Include other players as offensive-aura targets (PvP friendly-fire).")
                 .define("includeOtherPlayers", true);
         OFFENSIVE_INCLUDE_TAMED_PETS = builder
-                .comment("DEPRECATED in 1.4.1 — replaced by offensiveTargeting.includeOtherPlayerPets. Own pets are always skipped. Read for a one-shot migration warning.")
+                .comment("Deprecated since 1.4.1. Ignored at runtime; emits a deprecation warning on startup if non-default. Replacement: offensiveTargeting.includeOtherPlayerPets. Own pets are always skipped.")
                 .define("includeTamedPets", false);
         OFFENSIVE_INCLUDE_OTHER_PLAYER_PETS = builder
                 .comment("Include other players' tamed pets as offensive-aura targets. Off by default — friendly-fire on someone else's wolf is usually accidental.")
@@ -280,6 +278,50 @@ public class EIServerConfig {
         builder.pop();
 
         SPEC = builder.build();
+    }
+
+    /**
+     * Safe accessor for {@link #DURABILITY_ENABLED} on the client render path.
+     * Forge SERVER-config values are not loaded on the title screen, world list,
+     * or any item-preview screen rendered before joining a world; calling
+     * {@code .get()} there throws {@link IllegalStateException}. Use this from
+     * any client-side reader that may run pre-join — failure mode is "feature
+     * silently off until config arrives via handshake."
+     */
+    public static boolean isDurabilityEnabledSafe() {
+        try {
+            return DURABILITY_ENABLED.get();
+        } catch (IllegalStateException ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * One-shot startup pass that warns when any of the deprecated 1.4.x config
+     * keys are set to a non-default value. Wired from the
+     * {@code ServerAboutToStartEvent} handler in {@code EffectiveInstrumentsMod}
+     * so the SERVER spec is loaded before we read. Slated for hard-removal in
+     * 1.5.0; emitting the warning gives admins a window to clean their TOMLs.
+     */
+    public static void warnDeprecated() {
+        warnIfNonDefault("targeting.allowSelfBuff",                 ALLOW_SELF_BUFF.get(),                 true);
+        warnIfNonDefault("targeting.includeOtherPlayers",           INCLUDE_OTHER_PLAYERS.get(),           true);
+        warnIfNonDefault("targeting.includeTamedPets",              INCLUDE_TAMED_PETS.get(),              true);
+        warnIfNonDefault("targeting.maxTargetsPerTick",             MAX_TARGETS_PER_TICK.get(),            32);
+        warnIfNonDefault("offensiveTargeting.allowSelf",            OFFENSIVE_ALLOW_SELF.get(),            false);
+        warnIfNonDefault("offensiveTargeting.includeTamedPets",     OFFENSIVE_INCLUDE_TAMED_PETS.get(),    false);
+        warnIfNonDefault("mobileTier.allowSelfBuff",                MOBILE_ALLOW_SELF_BUFF.get(),          true);
+        warnIfNonDefault("mobileTier.includeOtherPlayers",          MOBILE_INCLUDE_OTHER_PLAYERS.get(),    true);
+        warnIfNonDefault("mobileTier.includeTamedPets",             MOBILE_INCLUDE_TAMED_PETS.get(),       false);
+    }
+
+    private static void warnIfNonDefault(String key, Object actual, Object specDefault) {
+        if (!java.util.Objects.equals(actual, specDefault)) {
+            EffectiveInstrumentsMod.LOGGER.warn(
+                    "Config key '{}' is deprecated and ignored at runtime (current value: {}). "
+                            + "Remove it from server.toml — slated for hard-removal in 1.5.0.",
+                    key, actual);
+        }
     }
 
     private EIServerConfig() {}

@@ -158,6 +158,14 @@ public class SelectAuraC2SPacket {
         if (server == null) return;
         MobilePlayerSelection selections = MobilePlayerSelection.get(server);
 
+        // 1.4.9 (RECS §1.4): 5-tick (~250ms) cooldown — matches the stationary
+        // selection throttle. Without this a malicious client can flood
+        // selections, each of which marks the SavedData dirty and forces
+        // autosave I/O.
+        long now = sender.level().getGameTime();
+        if (now - selections.getLastMobileSelectionTick(sender.getUUID()) < 5) return;
+        selections.markMobileSelectionTime(sender.getUUID(), now);
+
         if (msg.auraId.isEmpty()) {
             selections.setSelection(sender.getUUID(), instrumentId, null);
             return;

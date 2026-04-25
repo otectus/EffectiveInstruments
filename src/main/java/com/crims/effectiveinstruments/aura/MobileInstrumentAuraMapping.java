@@ -1,6 +1,7 @@
 package com.crims.effectiveinstruments.aura;
 
 import com.crims.effectiveinstruments.EffectiveInstrumentsMod;
+import com.crims.effectiveinstruments.util.ConfigIO;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -113,7 +114,7 @@ public final class MobileInstrumentAuraMapping {
             addMobileEntry(root, "immersive_melodies:handpan", "stillwater_mobile", "abyssal_rattle_mobile");
             addMobileEntry(root, "immersive_melodies:ender_bass", "shade_resonance_mobile", "soul_tremor_mobile");
 
-            Files.writeString(mappingFile, GSON.toJson(root), StandardCharsets.UTF_8);
+            ConfigIO.writeAtomically(mappingFile, GSON.toJson(root));
             Files.createFile(marker);
             Path offensiveMarker = getOffensiveMigrationMarker();
             if (!Files.exists(offensiveMarker)) {
@@ -194,7 +195,7 @@ public final class MobileInstrumentAuraMapping {
         }
 
         try {
-            Files.writeString(mappingFile, GSON.toJson(root), StandardCharsets.UTF_8);
+            ConfigIO.writeAtomically(mappingFile, GSON.toJson(root));
             Files.createFile(marker);
             if (upgraded > 0) {
                 EffectiveInstrumentsMod.LOGGER.info(
@@ -330,7 +331,7 @@ public final class MobileInstrumentAuraMapping {
                 entry.add("allowed", allowed);
                 root.add(e.getKey().toString(), entry);
             }
-            Files.writeString(getMappingFile(), GSON.toJson(root), StandardCharsets.UTF_8);
+            ConfigIO.writeAtomically(getMappingFile(), GSON.toJson(root));
             Path marker = getOffensiveMigrationMarker();
             if (!Files.exists(marker)) {
                 try {

@@ -3,7 +3,7 @@
 ## Quick Reference
 - **Mod ID**: `effectiveinstruments`
 - **Package**: `com.crims.effectiveinstruments`
-- **Version**: 1.4.8
+- **Version**: 1.4.10
 - **MC**: 1.20.1 | **Forge**: 47.3.0 | **Java**: 17
 - **Mappings**: Official
 
@@ -38,6 +38,160 @@
   repair material for `repairPerUnit` durability each.
 - **Admin subcommand** — `/effectiveinstruments durability {get|set <n>|repair}`
   operates on the main-hand (or off-hand) instrument.
+
+## 1.4.10 Release
+- **Release of the 1.4.9 hotfix bundle.** No functional changes vs 1.4.9.
+  Migrates the in-tree changelog from this file (development-facing) into
+  the user-facing `CHANGELOG.md` (Keep a Changelog format) and bumps the
+  published version so the bundle gets a clean release tag.
+- README.md updated: dropped the stale "free-play not supported in this
+  version" note (free-play has been supported since 1.4.3 — the lang
+  string and class docs were already cleaned up in 1.4.9).
+
+## 1.4.9 Hotfix Set
+- **Durability fallback now actually fires.** `InstrumentDurability.resolveEntry`
+  used to return `null` for any item not pre-listed in
+  `instrument_durability.json`, so third-party instruments and any newly-
+  shipped instrument the JSON didn't yet cover got zero durability tracking
+  — exactly the opposite of what `InstrumentDurabilityConfig`'s class doc
+  promised. 1.4.9 synthesizes a default `Entry` from
+  `EIServerConfig.DURABILITY_DEFAULT_MAX` when the lookup misses AND the
+  item's namespace is in the new shared
+  `com.crims.effectiveinstruments.durability.InstrumentNamespaces.INSTRUMENT_MOD_IDS`
+  allowlist (`genshinstrument`, `evenmoreinstruments`, `immersive_melodies`).
+  Non-instrument items still get `NO_ENTRY` so swords/shields/etc. don't
+  accidentally pick up an invisible NBT durability bar.
+- **`AuraRegistry.load` split into two phases.** The 1.4.x flow ran
+  config-dependent work (pet allowlist invalidation, durability default
+  fallback) at common-setup, before the SERVER `ForgeConfigSpec` is loaded
+  by Forge. Result was either an `IllegalStateException` from `IntValue.get()`
+  or silently using the spec default — quietly self-correcting on `/reload`,
+  which masked the bug. New split: `loadPresetsAndMappings()` runs at
+  common-setup (JSON only, no config reads), `refreshConfigDerived()` runs
+  from a new `ServerAboutToStartEvent` handler in `EffectiveInstrumentsMod`.
+  `AuraRegistry.load` keeps the old API by chaining both halves; the
+  `/effectiveinstruments reload` command path is unchanged.
+- **`InstrumentDurabilityBarDecorator` SERVER-config read is now safe.** The
+  bar decorator's `renderBar` called `EIServerConfig.DURABILITY_ENABLED.get()`
+  unprotected, which throws `IllegalStateException` on the title screen, world
+  list, and REI/JEI item-preview overlays rendered before world join. New
+  static `EIServerConfig.isDurabilityEnabledSafe()` wraps the read in
+  try/catch returning `false` when the spec isn't loaded; consolidates the
+  duplicated try/catch pattern that already lived in
+  `DurabilityTooltipHandler`. Both call sites now route through the helper.
+- **Mobile packets are now rate-limited.** Stationary `InstrumentOpenC2SPacket`
+  and `SelectAuraC2SPacket` had a 5-tick (~250 ms) cooldown; the mobile paths
+  did not. A misbehaving client could flood mobile selections, each of which
+  marks `MobilePlayerSelection`'s SavedData dirty and forces autosave I/O.
+  `MobilePlayerSelection` grew a transient `lastMobileSelectionTick` map +
+  `markMobileSelectionTime` / `getLastMobileSelectionTick` accessors; the
+  packet handler short-circuits inside the cooldown window without touching
+  the SavedData. `ImmersiveMelodiesAuraHandler.acceptOpenPacket` enforces
+  the same 5-tick throttle on mobile open/close traffic; both throttles are
+  cleared on `onPlayerLogout` so dropped players don't pin map entries.
+- **Stale `aura_hint` lang string fixed.** The tooltip line attached to every
+  tracked instrument said "Right-click to open the aura selector (top-right)"
+  — but right-click opens the *instrument*, not the selector. New text:
+  "Open the instrument to choose an aura (top-right of the screen)".
+- **Stale 1.3.0 free-play limitation comments / lang string scrubbed.**
+  `ImmersiveMelodiesAuraHandler` and `ImmersiveMelodiesCompat` class docs
+  still claimed free-play was unsupported (it's been working since 1.4.3).
+  Lang key `tooltip.effectiveinstruments.compat.immersive_melodies.limitations`
+  renamed to `.notes` and rewritten to describe the dual activation path
+  (NBT `playing=true` for autoplay, `screenOpenInstrumentId` for free-play).
+- **`EntityCategory.classify` comment now matches behavior.** The lines 66-69
+  comment promised owner-tracking for extra-pet types ("treat as musician-
+  owned") that the code never implemented — the actual behavior bucketed
+  unknown-owner extra-pet types as `PASSIVE_MOB`, which is the correct
+  defensive choice. Comment rewritten to describe what the code actually does.
+- **Deprecation warnings on startup.** Eight 1.4.x-deprecated config keys
+  (`targeting.allowSelfBuff`, `targeting.includeOtherPlayers`,
+  `targeting.includeTamedPets`, `targeting.maxTargetsPerTick`,
+  `offensiveTargeting.allowSelf`, `offensiveTargeting.includeTamedPets`,
+  `mobileTier.allowSelfBuff`, `mobileTier.includeOtherPlayers`,
+  `mobileTier.includeTamedPets`) had inaccurate "still read" / "migration
+  default" comments. New `EIServerConfig.warnDeprecated()` wired from the
+  `ServerAboutToStartEvent` handler emits a `WARN` line listing any key set
+  to a non-spec-default value — gives admins a window to clean their TOMLs
+  before the 1.5.0 hard-removal.
+- **Anvil repair now follows vanilla cost-growth.** Both `combine` and
+  `material` paths in `InstrumentAnvilHandler` set a flat `2` / `materialsNeeded * 2`
+  XP cost and ignored the stack's `RepairCost` NBT — instruments were
+  indefinitely cheap to keep repaired. 1.4.9 reads `getBaseRepairCost()`,
+  computes `AnvilMenu.calculateIncreasedRepairCost(prev)` (= `prev * 2 + 1`),
+  writes it back via `setRepairCost(next)`, and bills `next + flat`. After
+  ~5 combines an instrument hits the same Too-Expensive cliff as a vanilla
+  diamond pickaxe.
+- **Atomic-write parity across every config writer.** Promoted
+  `InstrumentAuraMapping.writeAtomically` into a shared
+  `com.crims.effectiveinstruments.util.ConfigIO.writeAtomically` utility
+  (temp + ATOMIC_MOVE, fall back to plain replace on Windows FAT). Routed
+  every previously non-atomic writer through it: `InstrumentAuraMapping`
+  (3 sites + `_README_INSTRUMENTS.txt`), `MobileInstrumentAuraMapping`
+  (3 sites), `InstrumentDurabilityConfig` (1 site), `AuraJsonLoader` (5
+  sites including the preset writers and `_README.txt`). A power-loss
+  mid-write can no longer truncate any user-edited config file.
+- **Mobile-tier per-tick scan is now bounded.** `ImmersiveMelodiesAuraHandler.onServerTick`
+  used to walk every player on the level every pulse — 100 hash-map probes
+  per second per dimension on a 100-player public server, even when nobody's
+  using an IM instrument. New `ACTIVE_MOBILE_MUSICIANS` set is populated by
+  `onScreenOpened` and a periodic discovery scan that picks up players who
+  trigger autoplay without ever opening an IM screen. Idle players drop out
+  after the configured linger window. On a server with zero IM users the
+  loop is empty.
+- **`affectedTargets` map is now pruned of dead-entity ids.** Both
+  `AuraManager.PlayerAuraState` and `ImmersiveMelodiesAuraHandler.MobileAuraState`
+  gained a `lastPruneTick` field; the per-pulse tick handlers run
+  `affectedTargets.keySet().removeIf(id -> level.getEntity(id) == null)`
+  once per minute (1200 ticks). Without this the map grew unbounded with
+  dead-mob ids in long sessions where the same aura kept firing.
+- **`radius` and `durationTicks` are now clamped at parse time.** A user-
+  edited (or maliciously-shipped pack) JSON could set `"radius": 10000` or
+  `"durationTicks": 24000`, which would inflate the AABB scan to a 20k-cube
+  area or queue 20-minute effects that linger past the cleanup window. New
+  `clampField` helper in `AuraJsonLoader.parseFile` clamps `radius` to
+  [1, 64] (matching the global config knob) and `durationTicks` to
+  [20, 6000] (1 second to 5 minutes). WARN-logged when the input is out of
+  range.
+- **Polish.** Legacy `tools/generate_aura_icons.py` (dead since 1.4.2)
+  deleted — `tools/gen_aura_icons.py` is canonical. `instrumentOpen` flag's
+  load-bearing `onAuraSwitch + clearAuraSelection` gate dropped from
+  `AuraManager.onInstrumentClose` so closing an instrument always strips
+  applied effects (the gate previously left targets buffed when the player
+  triggered the aura via `onNotePlayed` without flipping `instrumentOpen`).
+  Offensive-uniqueness audit + synthesis passes now share a single
+  `computeOffensiveOwnership` walk of `MAPPINGS` instead of two; synthesis
+  log message includes the synthesized count. Mobile fallback overlay in
+  `AuraOverlayInjector` now honors `showInSelector` (curated allow-lists
+  intentionally bypass it; the catch-all fallback is a different surface).
+  Defensive client-tick guard in `AuraOverlayInjector` clears the IM overlay
+  state if a non-`Closing` screen swap leaves the state attached to a
+  no-longer-rendered screen.
+- **`AuraSelectorWidget` no longer holds a stale `Screen` reference.** The
+  `parentScreen` field demoted to a constructor-local `int parentScreenWidth`
+  — window-resize re-fires `Init.Post` which builds a fresh widget, so no
+  recycled instance reads stale `screen.width`. `AuraOverlayInjector` tracks
+  the stationary screen identity locally as `stationaryOverlayScreen`,
+  parallel to the existing `imOverlayScreen` for the IM path.
+- **`/effectiveinstruments diagnose` now shows positive-targeting state.**
+  Added a parallel block to the offensive line so "my regen aura doesn't
+  hit my ally" complaints have a single-command answer.
+- **`OFFENSIVE_INCLUDE_OTHER_PLAYERS` toggle is no longer silently overridden.**
+  With the default `OFFENSIVE_INCLUDE_ALL_NON_PETS=true`, the dedicated
+  PvP toggle was ignored — admins flipping `OFFENSIVE_INCLUDE_OTHER_PLAYERS=false`
+  to make their server PvP-safe got no actual suppression. 1.4.9 gates
+  `OTHER_PLAYER` on the dedicated toggle inside the
+  `INCLUDE_ALL_NON_PETS=true` branch. **Behavior change** for servers that
+  were relying on the old (broken) behavior of "ignore OTHER_PLAYERS toggle
+  when ALL_NON_PETS is on" — call out in your release notes.
+- **State-machine unit tests added.** `AuraManagerActiveStateTest`,
+  `InstrumentDurabilityNamespaceTest`, `InstrumentAnvilHandlerMathTest` —
+  pure-JUnit, mirror the production logic locally (same pattern as
+  `AuraApplicatorBehaviorTest`). Cover the sliding-window activation
+  algorithm, namespace-allowlist + fallback-Entry math, and anvil cost
+  escalation + materials-needed rounding.
+- **Comment-only.** `EIPacketHandler.PROTOCOL_VERSION` now carries a TODO
+  for the 1.5.0 bump conditions.
 
 ## 1.4.8 Hotfix Set
 - **Offensive aura synthesis is now uniqueness-aware.** Previously, the

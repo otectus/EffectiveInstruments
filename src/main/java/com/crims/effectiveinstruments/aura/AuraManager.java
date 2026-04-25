@@ -27,11 +27,23 @@ public class AuraManager {
         long lastNoteGameTime = -1;
         long lastSelectionTick = -1;
         long lastOpenPacketTick = -1;
+        /**
+         * 1.4.9 (RECS §2.7): last server tick on which {@link #affectedTargets}
+         * was pruned of dead-entity ids. Pruning is amortized to once per
+         * minute (1200 ticks) — without it the map grows unbounded with
+         * dead-mob ids in long sessions where the same aura keeps firing.
+         */
+        long lastPruneTick = Long.MIN_VALUE;
         // Sliding window of note timestamps for the activation-threshold check.
         // Bounded in practice by NOTE_THRESHOLD_WINDOW_TICKS * note rate.
         final Deque<Long> recentNoteTicks = new ArrayDeque<>();
-        // Authoritative instrument-open flag — set only by the server-side
-        // InstrumentOpenStateChangedEvent handler, never by a client packet.
+        /**
+         * Mirrors the client's open-screen state for diagnostics; not load-
+         * bearing for aura activation. Set by the server-side
+         * InstrumentOpenStateChangedEvent handler, cleared on close. Reads in
+         * /effectiveinstruments status + diagnose only — kept so future
+         * reintroduction of a screen-state-aware feature has a hook ready.
+         */
         boolean instrumentOpen = false;
         // entity network ID -> set of effects we applied to that entity
         final Map<Integer, Set<MobEffect>> affectedTargets = new HashMap<>();
@@ -163,7 +175,12 @@ public class AuraManager {
 
     public static void onInstrumentClose(Player player) {
         PlayerAuraState state = getOrCreate(player.getUUID());
-        if (state.instrumentOpen && player instanceof ServerPlayer sp) {
+        // 1.4.9 (RECS §3.2): drop the `instrumentOpen && ...` gate. A player
+        // who triggered the aura via onNotePlayed (which doesn't flip
+        // instrumentOpen) and then closed the instrument used to leave their
+        // tracked targets buffed until the effects expired naturally — the
+        // gate suppressed the cleanup pass. Now we always clear on close.
+        if (player instanceof ServerPlayer sp) {
             onAuraSwitch(sp);
             clearAuraSelection(sp);
         }
@@ -218,6 +235,14 @@ public class AuraManager {
                         "Cleared stale aura selection '{}' for player {}",
                         aura.id(), player.getName().getString());
                 continue;
+            }
+
+            // 1.4.9 (RECS §2.7): amortized prune of dead-entity ids. Once
+            // per minute keeps the map bounded in long sessions without
+            // adding any per-tick scan cost.
+            if (gameTime - state.lastPruneTick >= 1200) {
+                state.lastPruneTick = gameTime;
+                state.affectedTargets.keySet().removeIf(id -> level.getEntity(id) == null);
             }
 
             applyAuraEffects(player, aura);

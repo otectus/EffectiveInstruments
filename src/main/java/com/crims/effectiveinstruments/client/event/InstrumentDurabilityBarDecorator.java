@@ -3,6 +3,7 @@ package com.crims.effectiveinstruments.client.event;
 import com.crims.effectiveinstruments.EffectiveInstrumentsMod;
 import com.crims.effectiveinstruments.config.EIServerConfig;
 import com.crims.effectiveinstruments.durability.InstrumentDurability;
+import com.crims.effectiveinstruments.durability.InstrumentNamespaces;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.resources.ResourceLocation;
@@ -15,8 +16,6 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.registries.ForgeRegistries;
 
-import java.util.Set;
-
 /**
  * Draws a vanilla-style durability bar across the bottom of instrument item
  * slots. Instrument items are owned by foreign mods (Genshin Instruments, Even
@@ -24,8 +23,9 @@ import java.util.Set;
  * their {@link Item} classes — without that, vanilla's own bar code
  * ({@link Item#isBarVisible}, {@link Item#getBarWidth}, {@link Item#getBarColor})
  * never fires. Instead we attach an {@link IItemDecorator} to every item whose
- * mod id is in {@link #INSTRUMENT_MOD_IDS}; the decorator runs on top of the
- * slot render and draws the bar when the stack has NBT durability tracked.
+ * mod id is in {@link InstrumentNamespaces#INSTRUMENT_MOD_IDS}; the decorator
+ * runs on top of the slot render and draws the bar when the stack has NBT
+ * durability tracked.
  *
  * <p>The decorator is purely visual — it reads {@link InstrumentDurability}
  * state, it doesn't mutate anything.
@@ -37,25 +37,18 @@ import java.util.Set;
 )
 public final class InstrumentDurabilityBarDecorator {
 
-    private static final Set<String> INSTRUMENT_MOD_IDS = Set.of(
-            "genshinstrument",
-            "evenmoreinstruments",
-            "immersive_melodies"
-    );
-
     @SubscribeEvent
     public static void onRegisterItemDecorations(final RegisterItemDecorationsEvent event) {
         int registered = 0;
         for (Item item : ForgeRegistries.ITEMS.getValues()) {
             ResourceLocation id = ForgeRegistries.ITEMS.getKey(item);
-            if (id == null) continue;
-            if (!INSTRUMENT_MOD_IDS.contains(id.getNamespace())) continue;
+            if (!InstrumentNamespaces.contains(id)) continue;
             event.register(item, InstrumentDurabilityBarDecorator::renderBar);
             registered++;
         }
         EffectiveInstrumentsMod.LOGGER.info(
                 "Registered durability-bar decorator for {} potential instrument item(s) (mod ids: {})",
-                registered, INSTRUMENT_MOD_IDS);
+                registered, InstrumentNamespaces.INSTRUMENT_MOD_IDS);
     }
 
     /**
@@ -68,7 +61,10 @@ public final class InstrumentDurabilityBarDecorator {
             GuiGraphics graphics, Font font, ItemStack stack, int xOffset, int yOffset
     ) {
         if (stack.isEmpty()) return false;
-        if (!EIServerConfig.DURABILITY_ENABLED.get()) return false;
+        // SERVER-config-safe accessor — pre-join screens (title, world list,
+        // REI/JEI item-preview overlays) render before the SERVER spec is
+        // loaded; isDurabilityEnabledSafe returns false in that window.
+        if (!EIServerConfig.isDurabilityEnabledSafe()) return false;
         if (!InstrumentDurability.isTracked(stack)) return false;
 
         int max = InstrumentDurability.getMax(stack);

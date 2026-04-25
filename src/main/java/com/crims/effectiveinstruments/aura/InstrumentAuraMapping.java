@@ -1,6 +1,7 @@
 package com.crims.effectiveinstruments.aura;
 
 import com.crims.effectiveinstruments.EffectiveInstrumentsMod;
+import com.crims.effectiveinstruments.util.ConfigIO;
 import com.google.gson.*;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.fml.loading.FMLPaths;
@@ -211,7 +212,7 @@ public final class InstrumentAuraMapping {
                 addInstrumentEntry(root, e.getKey(), positive, offensive);
             }
 
-            Files.writeString(mappingFile, GSON.toJson(root), StandardCharsets.UTF_8);
+            ConfigIO.writeAtomically(mappingFile, GSON.toJson(root));
             writeReadme(mappingFile.getParent());
             Files.createFile(marker);
             // Mark the offensive migration and 1.4.4 unique-assignment as already
@@ -317,7 +318,7 @@ public final class InstrumentAuraMapping {
         }
 
         try {
-            writeAtomically(mappingFile, GSON.toJson(root));
+            ConfigIO.writeAtomically(mappingFile, GSON.toJson(root));
             Files.createFile(marker);
             if (upgraded > 0) {
                 EffectiveInstrumentsMod.LOGGER.info(
@@ -410,7 +411,7 @@ public final class InstrumentAuraMapping {
         }
 
         try {
-            writeAtomically(mappingFile, GSON.toJson(root));
+            ConfigIO.writeAtomically(mappingFile, GSON.toJson(root));
             Files.createFile(marker);
             if (reassigned > 0 || added > 0) {
                 EffectiveInstrumentsMod.LOGGER.info(
@@ -428,27 +429,6 @@ public final class InstrumentAuraMapping {
      * caller stored it as a string shorthand or as an object. Returns
      * {@code null} for malformed entries.
      */
-    /**
-     * Atomic replacement for {@code Files.writeString}. Writes to a sibling
-     * {@code .tmp} then {@link Files#move}s with {@code ATOMIC_MOVE,
-     * REPLACE_EXISTING} so a crash mid-write can't truncate the real file.
-     * Falls back to non-atomic write if the filesystem rejects {@code
-     * ATOMIC_MOVE} (some Windows configurations). Used by the migration
-     * rewrite sites where the file holds user customization we can't afford
-     * to lose.
-     */
-    private static void writeAtomically(Path target, String content) throws IOException {
-        Path tmp = target.resolveSibling(target.getFileName().toString() + ".tmp");
-        Files.writeString(tmp, content, StandardCharsets.UTF_8);
-        try {
-            Files.move(tmp, target,
-                    java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        } catch (java.nio.file.AtomicMoveNotSupportedException e) {
-            Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        }
-    }
-
     @Nullable
     private static String extractDefaultId(JsonElement entry) {
         if (entry.isJsonPrimitive() && entry.getAsJsonPrimitive().isString()) {
@@ -534,7 +514,7 @@ public final class InstrumentAuraMapping {
 
                 Use /effectiveinstruments reload to apply changes without restarting.
                 """;
-        Files.writeString(dir.resolve("_README_INSTRUMENTS.txt"), readme, StandardCharsets.UTF_8);
+        ConfigIO.writeAtomically(dir.resolve("_README_INSTRUMENTS.txt"), readme);
     }
 
     // --- Loading ---
@@ -608,18 +588,24 @@ public final class InstrumentAuraMapping {
         // opportunistically rewrite the file so the next reload sees clean
         // state. Failure to rewrite is non-fatal — the in-memory result is
         // authoritative.
-        int synthesized = synthesizeMissingOffensiveAllowed();
+        Map<String, List<ResourceLocation>> ownership = computeOffensiveOwnership();
+        int synthesized = synthesizeMissingOffensiveAllowed(ownership);
         if (synthesized > 0) {
             EffectiveInstrumentsMod.LOGGER.info(
                     "Auto-added offensive aura to {} instrument mapping(s). Opportunistically rewriting file.", synthesized);
             tryRewriteMappingFile(root);
+            // Synthesis mutated MAPPINGS — recompute ownership so the audit
+            // sees the post-synthesis state.
+            ownership = computeOffensiveOwnership();
         }
 
         // 1.4.8: post-synthesis audit — catches duplicates introduced by user
         // edits or corrupt mapping files that weren't touched by synthesis.
-        auditOffensiveUniqueness();
+        auditOffensiveUniqueness(ownership);
 
-        EffectiveInstrumentsMod.LOGGER.info("Loaded {} instrument-aura mappings", MAPPINGS.size());
+        EffectiveInstrumentsMod.LOGGER.info(
+                "Loaded {} instrument-aura mappings ({} synthesized this load)",
+                MAPPINGS.size(), synthesized);
     }
 
     /**
@@ -631,25 +617,23 @@ public final class InstrumentAuraMapping {
      * <p>Only augments when the offensive preset is actually present and
      * enabled in the registry — otherwise we'd pollute the allowed list with
      * a reference the selector would silently filter out anyway.
+     *
+     * <p>1.4.9 (RECS §3.3): consumes a precomputed ownership map (offensive
+     * id → instruments) so the audit pass at the end of {@link #load} can
+     * reuse the same walk.
      */
-    private static int synthesizeMissingOffensiveAllowed() {
+    private static int synthesizeMissingOffensiveAllowed(Map<String, List<ResourceLocation>> offensiveOwnership) {
         int count = 0;
         int offensivePresetsMissing = 0;
 
-        // 1.4.8: batch-ified uniqueness pass. First collect every offensive id
-        // already claimed by an instrument (either via a shipped pair or a
-        // user-custom explicit mapping). Then iterate the gaps and, for each,
-        // pick an offensive id that isn't already in `taken`. This prevents
-        // the effect-based fallback from assigning the same offensive (e.g.
-        // `echoes_of_decay`) to every custom regen-primary positive.
-        Set<String> taken = new HashSet<>();
+        // 1.4.8: batch-ified uniqueness pass. Seed `taken` from the precomputed
+        // ownership map, then add the curated 1-to-1 pair for each instrument
+        // even if it's not in the allowed list yet — avoids the next iteration
+        // grabbing it for someone else. This is what prevents the effect-based
+        // fallback from assigning the same offensive (e.g. `echoes_of_decay`)
+        // to every custom regen-primary positive.
+        Set<String> taken = new HashSet<>(offensiveOwnership.keySet());
         for (InstrumentAuraConfig config : MAPPINGS.values()) {
-            for (String id : config.allowedAuraIds()) {
-                AuraRegistry.getById(id).filter(AuraPreset::isOffensive).ifPresent(p -> taken.add(id));
-            }
-            // Also seed `taken` with the curated pair for this instrument, even
-            // if it's not in the allowed list yet — avoids the next iteration
-            // grabbing it for someone else.
             String pair = POSITIVE_TO_OFFENSIVE_AURA_ID.get(config.defaultAuraId());
             if (pair != null) taken.add(pair);
         }
@@ -719,15 +703,11 @@ public final class InstrumentAuraMapping {
      * end of {@link #load}; warn-level so duplicates are visible in the
      * server log without hard-failing the boot. Informational for custom
      * user mappings, diagnostic for shipped ones.
+     *
+     * <p>1.4.9 (RECS §3.3): takes a precomputed ownership map so the synthesis
+     * pass and this audit share one walk of {@link #MAPPINGS} instead of two.
      */
-    private static void auditOffensiveUniqueness() {
-        Map<String, List<ResourceLocation>> offensiveOwners = new HashMap<>();
-        for (Map.Entry<ResourceLocation, InstrumentAuraConfig> e : MAPPINGS.entrySet()) {
-            for (String auraId : e.getValue().allowedAuraIds()) {
-                AuraRegistry.getById(auraId).filter(AuraPreset::isOffensive).ifPresent(p ->
-                        offensiveOwners.computeIfAbsent(auraId, k -> new ArrayList<>()).add(e.getKey()));
-            }
-        }
+    private static void auditOffensiveUniqueness(Map<String, List<ResourceLocation>> offensiveOwners) {
         int duplicates = 0;
         for (Map.Entry<String, List<ResourceLocation>> e : offensiveOwners.entrySet()) {
             if (e.getValue().size() <= 1) continue;
@@ -742,6 +722,24 @@ public final class InstrumentAuraMapping {
                     "Offensive-aura uniqueness audit: {} mappings, no duplicate offensive ids",
                     MAPPINGS.size());
         }
+    }
+
+    /**
+     * Build an "offensive aura id → instruments that allow it" view of the
+     * current {@link #MAPPINGS}. Single source of truth for both the
+     * synthesis pass (which needs the {@code taken} set) and the post-load
+     * audit (which needs to spot duplicates). One walk per load instead of
+     * two — see RECS §3.3.
+     */
+    private static Map<String, List<ResourceLocation>> computeOffensiveOwnership() {
+        Map<String, List<ResourceLocation>> offensiveOwners = new HashMap<>();
+        for (Map.Entry<ResourceLocation, InstrumentAuraConfig> e : MAPPINGS.entrySet()) {
+            for (String auraId : e.getValue().allowedAuraIds()) {
+                AuraRegistry.getById(auraId).filter(AuraPreset::isOffensive).ifPresent(p ->
+                        offensiveOwners.computeIfAbsent(auraId, k -> new ArrayList<>()).add(e.getKey()));
+            }
+        }
+        return offensiveOwners;
     }
 
     /**
@@ -826,7 +824,7 @@ public final class InstrumentAuraMapping {
                 entry.add("allowed", allowed);
                 merged.add(e.getKey().toString(), entry);
             }
-            writeAtomically(getMappingFile(), GSON.toJson(merged));
+            ConfigIO.writeAtomically(getMappingFile(), GSON.toJson(merged));
             // Also drop the migration marker so the separate
             // ensureOffensiveAllowedLists() pass knows this is done.
             Path marker = getOffensiveMigrationMarker();

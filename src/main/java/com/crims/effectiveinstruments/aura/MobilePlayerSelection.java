@@ -31,6 +31,33 @@ public final class MobilePlayerSelection extends SavedData {
     // Outer: player UUID. Inner: instrument id → aura id.
     private final Map<UUID, Map<ResourceLocation, String>> selections = new HashMap<>();
 
+    /**
+     * Per-player throttle for {@code SelectAuraC2SPacket.handleMobile}. Mirrors
+     * the 5-tick cooldown the stationary path uses via
+     * {@code AuraManager.PlayerAuraState.lastSelectionTick}. Lives on the
+     * SavedData so it shares lifecycle with the selection map proper, but is
+     * NOT persisted (transient memory only — re-initialised on every server
+     * boot, which is correct because game-time resets too).
+     *
+     * <p>Without this, a misbehaving client can flood mobile selections, each
+     * of which calls {@link #setDirty()} and forces autosave I/O on every
+     * packet.
+     */
+    private final transient Map<UUID, Long> lastMobileSelectionTick = new HashMap<>();
+
+    public long getLastMobileSelectionTick(UUID playerId) {
+        Long t = lastMobileSelectionTick.get(playerId);
+        return t == null ? Long.MIN_VALUE : t;
+    }
+
+    public void markMobileSelectionTime(UUID playerId, long gameTick) {
+        lastMobileSelectionTick.put(playerId, gameTick);
+    }
+
+    public void clearThrottle(UUID playerId) {
+        lastMobileSelectionTick.remove(playerId);
+    }
+
     /** Return the chosen aura id for a player+instrument pair, or {@code null} if none set. */
     @Nullable
     public String getSelection(UUID playerId, ResourceLocation instrumentId) {

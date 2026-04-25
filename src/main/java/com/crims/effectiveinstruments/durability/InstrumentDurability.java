@@ -59,8 +59,40 @@ public final class InstrumentDurability {
         InstrumentDurabilityConfig.Entry entry = id == null
                 ? null
                 : InstrumentDurabilityConfig.get(id);
+        // 1.4.9 (RECS §1.1): when an item from a known instrument namespace
+        // isn't pre-listed in instrument_durability.json, synthesize a default
+        // Entry from EIServerConfig.DURABILITY_DEFAULT_MAX. Without this,
+        // third-party instruments and any newly-added shipped instrument the
+        // config doesn't yet cover get zero durability tracking — exactly the
+        // opposite of what InstrumentDurabilityConfig's class doc promises.
+        // The namespace gate keeps non-instrument items (sword, shield, etc.)
+        // from getting accidental durability tracking.
+        if (entry == null && InstrumentNamespaces.contains(id)) {
+            entry = synthesizeDefaultEntry();
+        }
         ENTRY_CACHE.put(stack.getItem(), entry == null ? NO_ENTRY : entry);
         return entry;
+    }
+
+    /**
+     * Build a fallback {@link InstrumentDurabilityConfig.Entry} from the
+     * server-config defaults. Returns {@code null} when SERVER config isn't
+     * loaded yet (pre-join client, or common-setup before
+     * {@code ServerAboutToStartEvent}) so the cache slot is filled with
+     * {@link #NO_ENTRY} and re-resolved after {@link #invalidateEntryCache}
+     * runs from the server-start handler.
+     */
+    @Nullable
+    private static InstrumentDurabilityConfig.Entry synthesizeDefaultEntry() {
+        try {
+            int defaultMax = EIServerConfig.DURABILITY_DEFAULT_MAX.get();
+            return new InstrumentDurabilityConfig.Entry(
+                    Math.max(1, defaultMax),
+                    null,
+                    Math.max(1, defaultMax / 5));
+        } catch (IllegalStateException ignored) {
+            return null;
+        }
     }
 
     /** Drop cached entries; call after {@link InstrumentDurabilityConfig#load}. */
@@ -132,7 +164,6 @@ public final class InstrumentDurability {
             return false;
         }
 
-        int max = getMax(stack);
         int before = getCurrent(stack);
         if (before <= 0) return false;
 

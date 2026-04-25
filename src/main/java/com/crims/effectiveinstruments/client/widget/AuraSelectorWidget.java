@@ -6,7 +6,6 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.narration.NarratedElementType;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -19,7 +18,6 @@ import java.util.function.Consumer;
 
 @OnlyIn(Dist.CLIENT)
 public class AuraSelectorWidget extends AbstractWidget {
-    public final Screen parentScreen;
     private final List<AuraButtonWidget> buttons = new ArrayList<>();
     private final Consumer<AuraPreset> onSelect; // accepts null for deselect
 
@@ -44,22 +42,26 @@ public class AuraSelectorWidget extends AbstractWidget {
     }
 
     public AuraSelectorWidget(
-            Screen parentScreen,
+            int parentScreenWidth,
             Collection<AuraPreset> presets,
             @Nullable String currentSelectedId,
             Consumer<AuraPreset> onSelect
     ) {
         super(0, MARGIN_TOP, 0, 0,
                 Component.translatable("widget.effectiveinstruments.aura_selector"));
-        this.parentScreen = parentScreen;
         this.onSelect = onSelect;
 
         int btnSize = getButtonSize();
         int btnGap = getButtonGap();
         int count = presets.size();
 
-        // Compute row wrapping: limit row width to ~60% of screen width
-        int maxRowWidth = (int) (parentScreen.width * MAX_ROW_WIDTH_FRACTION);
+        // Compute row wrapping: limit row width to ~60% of screen width.
+        // 1.4.9 (RECS §3.9): the constructor takes a plain int rather than
+        // the Screen reference. Window-resize re-fires Init.Post which builds
+        // a fresh widget — no stale Screen.width reads from a recycled
+        // widget instance, and no class-level Screen field that other code
+        // could grab and outlive.
+        int maxRowWidth = (int) (parentScreenWidth * MAX_ROW_WIDTH_FRACTION);
         int buttonsPerRow = Math.max(1, Math.min(count, (maxRowWidth + btnGap) / (btnSize + btnGap)));
         int rows = count <= 0 ? 0 : (count + buttonsPerRow - 1) / buttonsPerRow;
         int rowWidth = buttonsPerRow > 0
@@ -69,7 +71,7 @@ public class AuraSelectorWidget extends AbstractWidget {
         // Update widget dimensions and position
         this.width = rowWidth;
         this.height = rows > 0 ? rows * btnSize + (rows - 1) * btnGap : 0;
-        setX(parentScreen.width - rowWidth - MARGIN_RIGHT);
+        setX(parentScreenWidth - rowWidth - MARGIN_RIGHT);
 
         // Lay out buttons in a grid
         int col = 0;

@@ -1,6 +1,7 @@
 package com.crims.effectiveinstruments.aura;
 
 import com.crims.effectiveinstruments.EffectiveInstrumentsMod;
+import com.crims.effectiveinstruments.util.ConfigIO;
 import com.google.gson.*;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -435,12 +436,6 @@ public final class AuraJsonLoader {
         }
     }
 
-    private static void writeDefaultJson(Path dir, String id, String displayName, String description,
-                                          String color, int durationTicks, int sortOrder,
-                                          String[][] effects) throws IOException {
-        writeDefaultJson(dir, id, displayName, description, color, durationTicks, sortOrder, effects, null, null);
-    }
-
     /**
      * Generate the mobile-tier preset JSONs (1.3.0+). Guarded by a distinct marker
      * from the stationary defaults so upgraded installs receive these on their
@@ -593,7 +588,7 @@ public final class AuraJsonLoader {
         root.addProperty("showInSelector", true);
         appendEffects(root, effects);
         appendOffensiveIcons(root, id);
-        Files.writeString(file, GSON.toJson(root), StandardCharsets.UTF_8);
+        ConfigIO.writeAtomically(file, GSON.toJson(root));
     }
 
     /**
@@ -615,7 +610,7 @@ public final class AuraJsonLoader {
         root.addProperty("showInSelector", false);
         appendEffects(root, new String[][]{{effectId, Integer.toString(amplifier)}});
         appendOffensiveIcons(root, id);
-        Files.writeString(file, GSON.toJson(root), StandardCharsets.UTF_8);
+        ConfigIO.writeAtomically(file, GSON.toJson(root));
     }
 
     /**
@@ -698,7 +693,7 @@ public final class AuraJsonLoader {
         root.addProperty("icon", "effectiveinstruments:textures/gui/aura_" + id + ".png");
         root.addProperty("iconSelected", "effectiveinstruments:textures/gui/aura_" + id + "_selected.png");
 
-        Files.writeString(file, GSON.toJson(root), StandardCharsets.UTF_8);
+        ConfigIO.writeAtomically(file, GSON.toJson(root));
     }
 
     private static void writeDefaultJson(Path dir, String id, String displayName, String description,
@@ -730,7 +725,7 @@ public final class AuraJsonLoader {
         if (icon != null) root.addProperty("icon", icon);
         if (iconSelected != null) root.addProperty("iconSelected", iconSelected);
 
-        Files.writeString(file, GSON.toJson(root), StandardCharsets.UTF_8);
+        ConfigIO.writeAtomically(file, GSON.toJson(root));
     }
 
     private static void writeReadme(Path dir) throws IOException {
@@ -793,7 +788,7 @@ public final class AuraJsonLoader {
                   ]
                 }
                 """;
-        Files.writeString(dir.resolve("_README.txt"), readme, StandardCharsets.UTF_8);
+        ConfigIO.writeAtomically(dir.resolve("_README.txt"), readme);
     }
 
     // --- Loading ---
@@ -910,11 +905,18 @@ public final class AuraJsonLoader {
         // enabled
         boolean enabled = root.has("enabled") ? root.get("enabled").getAsBoolean() : true;
 
-        // durationTicks
-        int durationTicks = root.has("durationTicks") ? root.get("durationTicks").getAsInt() : 160;
+        // durationTicks. 1.4.9 (RECS §2.8): clamp at parse time. Hostile or
+        // mistakenly-edited JSON could otherwise queue a 24000-tick (20 min)
+        // effect that lingers far past AuraApplicator.clear's expected window.
+        int rawDuration = root.has("durationTicks") ? root.get("durationTicks").getAsInt() : 160;
+        int durationTicks = clampField(rawDuration, 20, 6000, "durationTicks", id);
 
-        // radius
-        int radius = root.has("radius") ? root.get("radius").getAsInt() : -1;
+        // radius. -1 means "use the global default at apply time"; any other
+        // value is clamped to the same [1, 64] range as the server-config
+        // DEFAULT_RADIUS knob. Without the clamp, an aura with radius 10000
+        // would inflate the AABB scan to a 20k-cube area and TPS-die.
+        int rawRadius = root.has("radius") ? root.get("radius").getAsInt() : -1;
+        int radius = rawRadius < 0 ? -1 : clampField(rawRadius, 1, 64, "radius", id);
 
         // sortOrder
         int sortOrder = root.has("sortOrder") ? root.get("sortOrder").getAsInt() : 100;
@@ -1031,6 +1033,23 @@ public final class AuraJsonLoader {
 
     private static String getStringOrDefault(JsonObject obj, String key, String def) {
         return obj.has(key) && obj.get(key).isJsonPrimitive() ? obj.get(key).getAsString() : def;
+    }
+
+    /**
+     * Clamp a JSON-supplied int into a sane range, logging a WARN when the
+     * input was outside it. Used at parse time for fields whose unbounded
+     * values can do real damage (radius -> AABB scan area, durationTicks ->
+     * effect linger past the cleanup window). Returning the clamped value
+     * keeps the rest of the pipeline trusting its inputs.
+     */
+    private static int clampField(int raw, int min, int max, String fieldName, String presetId) {
+        int clamped = Math.max(min, Math.min(raw, max));
+        if (clamped != raw) {
+            EffectiveInstrumentsMod.LOGGER.warn(
+                    "Aura '{}': field '{}' value {} clamped to {} (valid range {}-{})",
+                    presetId, fieldName, raw, clamped, min, max);
+        }
+        return clamped;
     }
 
     @Nullable

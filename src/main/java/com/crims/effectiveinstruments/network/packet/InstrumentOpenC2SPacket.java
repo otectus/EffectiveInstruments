@@ -91,6 +91,12 @@ public class InstrumentOpenC2SPacket {
     }
 
     private static void handleMobile(ServerPlayer sender, InstrumentOpenC2SPacket msg) {
+        // 1.4.9 (RECS §1.4): mirror the stationary-tier 5-tick throttle.
+        // Without this, flooding open/close packets thrashes the screen-open
+        // activation gate on the IM handler.
+        long now = sender.level().getGameTime();
+        if (!ImmersiveMelodiesAuraHandler.acceptOpenPacket(sender.getUUID(), now)) return;
+
         if (msg.close) {
             ImmersiveMelodiesAuraHandler.onScreenClosed(sender, msg.instrumentId);
         } else {

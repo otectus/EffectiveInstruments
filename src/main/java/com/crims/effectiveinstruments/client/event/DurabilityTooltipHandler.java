@@ -23,12 +23,9 @@ public final class DurabilityTooltipHandler {
 
     @SubscribeEvent
     public static void onTooltip(ItemTooltipEvent event) {
-        // Fail closed if config not loaded yet (rare, e.g. world-menu tooltip).
-        try {
-            if (!EIServerConfig.DURABILITY_ENABLED.get()) return;
-        } catch (IllegalStateException ignored) {
-            return;
-        }
+        // Fail closed if SERVER config not loaded yet (world-menu tooltip,
+        // REI/JEI item preview before world join, etc.).
+        if (!EIServerConfig.isDurabilityEnabledSafe()) return;
 
         if (!InstrumentDurability.isTracked(event.getItemStack())) return;
 

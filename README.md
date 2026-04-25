@@ -84,7 +84,7 @@ When [Immersive Melodies](https://www.curseforge.com/minecraft/mc-mods/immersive
 
 Mobile mappings live in `config/effective_instruments/mobile_instrument_auras.json` — same reload workflow as the stationary mappings.
 
-> **Note:** Mobile buffs only activate during autoplay / selected-melody playback. Free-play keyboard/MIDI mode in Immersive Melodies is not supported in this version.
+> **Note:** Mobile auras fire during autoplay, selected-melody playback, and free-play (any open IM screen). Durability is only charged on the held-and-playing path — browsing the melody list is free.
 
 ## How It Works
 

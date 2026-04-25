@@ -4,6 +4,163 @@ All notable changes to Effective Instruments will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.10] - 2026-04-25
+
+### Release
+- Promotes the 1.4.9 hotfix bundle (29 items across §1 critical / §2 major /
+  §3 polish from `RECOMMENDATIONS.md`) to a formal release. No functional
+  changes vs 1.4.9 — version bump exists to give the bundle a clean release
+  tag and to capture the long-form changelog migration from `CLAUDE.md`
+  (development-facing, dense) into this file (user-facing, Keep a Changelog
+  format).
+- See the 1.4.9 entry below for the full list of fixes.
+
+## [1.4.9] - 2026-04-25
+
+### Fixed
+- **Durability default-max fallback never fired.** `InstrumentDurability.resolveEntry`
+  used to return `null` for any item not pre-listed in
+  `instrument_durability.json`, so third-party instruments and any
+  newly-shipped instrument the JSON didn't yet cover got zero durability
+  tracking — exactly the opposite of what
+  `InstrumentDurabilityConfig`'s class doc promised. Now synthesizes a
+  default `Entry` from `EIServerConfig.DURABILITY_DEFAULT_MAX` when the
+  lookup misses AND the item's namespace is in the new shared
+  `InstrumentNamespaces.INSTRUMENT_MOD_IDS` allowlist (`genshinstrument`,
+  `evenmoreinstruments`, `immersive_melodies`). Non-instrument items still
+  get `NO_ENTRY` so swords/shields don't pick up an invisible NBT bar.
+- **`AuraRegistry.load` ran before SERVER config was loaded.** The 1.4.x
+  flow ran config-dependent work (pet allowlist invalidation, durability
+  default fallback) at common-setup, before the SERVER `ForgeConfigSpec`
+  is loaded by Forge. Result was either `IllegalStateException` from
+  `IntValue.get()` or silently using the spec default — quietly
+  self-correcting on `/reload`, masking the bug. Split into
+  `loadPresetsAndMappings()` (JSON-only, safe at common-setup) and
+  `refreshConfigDerived()` (config reads, deferred to a new
+  `ServerAboutToStartEvent` handler in `EffectiveInstrumentsMod`).
+  `AuraRegistry.load()` keeps the old API by chaining both halves.
+- **Bar decorator could crash on pre-join screens.**
+  `InstrumentDurabilityBarDecorator.renderBar` called
+  `EIServerConfig.DURABILITY_ENABLED.get()` unprotected — throws
+  `IllegalStateException` on the title screen, world list, and REI/JEI
+  item-preview overlays rendered before world join. New static
+  `EIServerConfig.isDurabilityEnabledSafe()` wraps the read in try/catch;
+  consolidates the duplicated try/catch pattern that already lived in
+  `DurabilityTooltipHandler`.
+- **Mobile packets had no rate limit.** Stationary
+  `InstrumentOpenC2SPacket` and `SelectAuraC2SPacket` had a 5-tick
+  cooldown; mobile paths did not. A misbehaving client could flood mobile
+  selections, each marking `MobilePlayerSelection`'s SavedData dirty and
+  forcing autosave I/O. Added matching 5-tick throttles via
+  `MobilePlayerSelection.markMobileSelectionTime` and
+  `ImmersiveMelodiesAuraHandler.acceptOpenPacket`; both clear on logout.
+- **Stale `aura_hint` lang string.** Tooltip read "Right-click to open
+  the aura selector (top-right)" but right-click opens the *instrument*,
+  not the selector. Now: "Open the instrument to choose an aura
+  (top-right of the screen)".
+- **Stale 1.3.0 free-play limitation comments + lang string.**
+  `ImmersiveMelodiesAuraHandler` and `ImmersiveMelodiesCompat` class docs
+  still claimed free-play was unsupported (working since 1.4.3). Lang key
+  `tooltip.effectiveinstruments.compat.immersive_melodies.limitations`
+  renamed to `.notes` and rewritten to describe the dual activation path.
+- **`EntityCategory.classify` comment promised behavior the code didn't
+  implement.** Comment block at lines 66–69 claimed extra-pet types were
+  "treated as musician-owned" when the code actually buckets them as
+  `PASSIVE_MOB`. Comment rewritten to match reality.
+- **Anvil repair ignored vanilla work-penalty escalation.** Both combine
+  and material paths set a flat XP cost and never wrote
+  `RepairCost` NBT — instruments were indefinitely cheap to keep
+  repaired. Now reads `getBaseRepairCost()`, computes
+  `AnvilMenu.calculateIncreasedRepairCost(prev)` (= `prev * 2 + 1`),
+  writes it back via `setRepairCost(next)`, and bills `next + flat`.
+  After ~5 combines an instrument hits the same Too-Expensive cliff as a
+  vanilla diamond pickaxe.
+- **`affectedTargets` map could grow unbounded.** Dead-mob entity ids
+  accumulated in long sessions with the same aura. Both
+  `AuraManager.PlayerAuraState` and
+  `ImmersiveMelodiesAuraHandler.MobileAuraState` gained a `lastPruneTick`
+  field; the per-pulse handlers run
+  `removeIf(id -> level.getEntity(id) == null)` once per minute.
+- **`radius` and `durationTicks` were unbounded at parse time.** A
+  user-edited or hostile JSON could set `"radius": 10000` or
+  `"durationTicks": 24000`, inflating the AABB scan to a 20k-cube area
+  or queueing 20-minute effects past the cleanup window. New
+  `clampField` helper in `AuraJsonLoader.parseFile` clamps `radius` to
+  [1, 64] and `durationTicks` to [20, 6000] with WARN logging.
+- **`instrumentOpen` flag's load-bearing gate.** `AuraManager.onInstrumentClose`
+  used to gate `onAuraSwitch + clearAuraSelection` on `instrumentOpen`,
+  so a player who triggered the aura via `onNotePlayed` (which doesn't
+  flip the flag) and then closed the instrument left their tracked
+  targets buffed until the effects expired naturally. Gate dropped;
+  cleanup now always runs on close.
+- **Mobile fallback overlay ignored `showInSelector`.** When the
+  per-instrument allow-list resolved to empty and the overlay fell back
+  to "every enabled mobile preset", hidden user-custom presets were
+  surfaced too. The fallback now honors `showInSelector`; the curated
+  per-instrument path still bypasses it intentionally.
+- **`OFFENSIVE_INCLUDE_OTHER_PLAYERS` toggle was silently ignored under
+  default config.** With `OFFENSIVE_INCLUDE_ALL_NON_PETS=true` (default),
+  the dedicated PvP toggle was overridden — admins flipping
+  `OFFENSIVE_INCLUDE_OTHER_PLAYERS=false` to make their server PvP-safe
+  got no actual suppression. The dedicated toggle is now respected
+  inside the `INCLUDE_ALL_NON_PETS=true` branch.
+  **⚠ Behavior change** for servers relying on the old (broken) behavior.
+
+### Added
+- **`EIServerConfig.isDurabilityEnabledSafe()`** — SERVER-config-safe
+  accessor for the client render path. Returns `false` when the spec
+  isn't loaded yet rather than throwing.
+- **`EIServerConfig.warnDeprecated()`** — one-shot startup pass that
+  emits a `WARN` for any of eight 1.4.x-deprecated config keys set to a
+  non-default value. Wired from `ServerAboutToStartEvent`. Slated for
+  hard-removal of these keys in 1.5.0.
+- **`com.crims.effectiveinstruments.util.ConfigIO.writeAtomically`** —
+  shared atomic-write utility (temp + ATOMIC_MOVE, fall back to plain
+  replace on Windows FAT). Promoted from `InstrumentAuraMapping`. All 11
+  previously non-atomic config writers now route through it.
+- **`com.crims.effectiveinstruments.durability.InstrumentNamespaces`** —
+  shared `INSTRUMENT_MOD_IDS` constant. Used by both the durability bar
+  decorator and the new fallback synthesis path.
+- **Mobile-tier active-musician set.**
+  `ImmersiveMelodiesAuraHandler.ACTIVE_MOBILE_MUSICIANS` bounds the
+  per-pulse server tick scan — `onServerTick` previously walked every
+  player on the level every pulse even when nobody was using an IM
+  instrument. Populated by `onScreenOpened` and a periodic discovery
+  scan; idle players drop out after the linger window.
+- **Defensive client-tick guard** in `AuraOverlayInjector` clears IM
+  overlay state if a non-`Closing` screen swap leaves the state attached
+  to a no-longer-rendered screen.
+- **`/effectiveinstruments diagnose`** now shows positive-targeting
+  state in a parallel block to the offensive line — answers "my regen
+  aura doesn't hit my ally" complaints in one command.
+- **Three new state-machine unit tests** (pure-JUnit, mirror production
+  logic locally — same pattern as `AuraApplicatorBehaviorTest`):
+  - `AuraManagerActiveStateTest` — sliding-window activation algorithm
+    (10 cases: empty deque, single recent note, sliding window
+    expiration, both-windows-required, threshold met / not met).
+  - `InstrumentDurabilityNamespaceTest` — namespace-allowlist
+    membership + fallback-Entry math + damage/repair clamping (12 cases).
+  - `InstrumentAnvilHandlerMathTest` — combine bonus, material-repair
+    rounding, work-penalty escalation, new 1.4.9 cost formula (12 cases).
+
+### Changed
+- **Synthesis log message** in `InstrumentAuraMapping.load` now includes
+  the count of mappings synthesized this load, not just the total.
+- **Offensive-uniqueness audit + synthesis pass** share a single
+  `computeOffensiveOwnership` walk of `MAPPINGS` instead of two.
+- **`AuraSelectorWidget.parentScreen` field demoted** to a constructor-
+  local `int parentScreenWidth`. Window-resize re-fires `Init.Post`
+  which builds a fresh widget — no recycled instance reads stale
+  `screen.width`. `AuraOverlayInjector` tracks the stationary screen
+  identity locally as `stationaryOverlayScreen`, parallel to the
+  existing `imOverlayScreen` for the IM path.
+- Deprecated config keys' comments rewritten to remove inaccurate
+  "still read"/"migration default" claims.
+
+### Removed
+- **`tools/generate_aura_icons.py`** — legacy icon generator dead since
+  1.4.2 (`tools/gen_aura_icons.py` is canonical per `CLAUDE.md`).
+
 ## [1.4.8] - 2026-04-18
 
 ### Fixed

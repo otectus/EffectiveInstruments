@@ -36,7 +36,13 @@ public final class TargetingProfiles {
             // own pets are already excluded for offensive by AuraApplicator's
             // polarity-enforced pet/self check; other-player-pets get excluded
             // by category omission below.
-            allowed.add(EntityCategory.OTHER_PLAYER);
+            //
+            // 1.4.9 (RECS §3.8): OTHER_PLAYER is gated by the dedicated PvP
+            // toggle even with includeAllNonPets=true. This makes PvP-safe
+            // servers safe by default when admins flip
+            // OFFENSIVE_INCLUDE_OTHER_PLAYERS=false — without this gate the
+            // dedicated toggle was silently ignored under the default config.
+            if (EIServerConfig.OFFENSIVE_INCLUDE_OTHER_PLAYERS.get()) allowed.add(EntityCategory.OTHER_PLAYER);
             allowed.add(EntityCategory.VILLAGER);
             allowed.add(EntityCategory.IRON_GOLEM);
             allowed.add(EntityCategory.PASSIVE_MOB);

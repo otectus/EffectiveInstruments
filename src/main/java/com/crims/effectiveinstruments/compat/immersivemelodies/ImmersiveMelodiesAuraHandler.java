@@ -15,7 +15,7 @@ import net.minecraft.world.effect.MobEffect;
 
 import javax.annotation.Nullable;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -26,14 +26,47 @@ import java.util.UUID;
  *
  * <p>All access is on the main server thread, same as {@link AuraManager}.
  *
- * <p>Known limitation (1.3.0): only reacts to IM autoplay / selected-melody
- * playback (the state that flips {@code playing=true} on the item stack).
- * Free-play keyboard/MIDI mode does not qualify — see
- * {@link ImmersiveMelodiesCompat} class docs.
+ * <p>Activation paths (1.4.3+):
+ * <ul>
+ *   <li><b>NBT-driven</b> — IM autoplay or selected-melody playback flips
+ *       {@code playing=true} on the held stack;
+ *       {@link ImmersiveMelodiesCompat#findActivePlayingStack} surfaces it.</li>
+ *   <li><b>Screen-open</b> — any IM screen open (including free-play
+ *       keyboard / MIDI) records {@code screenOpenInstrumentId} on the
+ *       per-player state via {@link #onScreenOpened}, and the tick loop
+ *       applies the aura even without {@code playing=true}.</li>
+ * </ul>
+ *
+ * <p>Free-play used to be a "known limitation" in 1.3.0. The screen-open
+ * path closed that gap; durability is still only charged on the held-and-
+ * playing path because browsing a melody list shouldn't wear the instrument.
  */
 public final class ImmersiveMelodiesAuraHandler {
 
     private static final Map<UUID, MobileAuraState> STATES = new HashMap<>();
+
+    /**
+     * Per-player throttle for mobile {@code InstrumentOpenC2SPacket} traffic.
+     * Mirrors the stationary 5-tick cooldown on
+     * {@code AuraManager.PlayerAuraState.lastOpenPacketTick}. Cleared on
+     * {@link #onPlayerLogout} so dropped players don't pin entries forever.
+     * Without this, a flood of open/close packets would thrash the
+     * screen-open activation gate (and on a public multiplayer server,
+     * the corresponding active-musician membership churn).
+     */
+    private static final Map<UUID, Long> LAST_OPEN_PACKET_TICK = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Returns true and records the tick when the packet should be honored.
+     * Returns false (no state change) when the packet falls inside the 5-tick
+     * cooldown window from the previous accepted packet for this player.
+     */
+    public static boolean acceptOpenPacket(UUID playerId, long gameTime) {
+        Long last = LAST_OPEN_PACKET_TICK.get(playerId);
+        if (last != null && gameTime - last < 5) return false;
+        LAST_OPEN_PACKET_TICK.put(playerId, gameTime);
+        return true;
+    }
 
     /** Per-player mobile aura state. Lives only here — no public surface. */
     static final class MobileAuraState {
@@ -42,6 +75,13 @@ public final class ImmersiveMelodiesAuraHandler {
         @Nullable
         ResourceLocation instrumentId;
         long lastActiveTick = Long.MIN_VALUE;
+        /**
+         * 1.4.9 (RECS §2.7): last server tick on which {@link #affectedTargets}
+         * was pruned of dead-entity ids. The prune is amortized to once per
+         * minute (1200 ticks) — without it the map grows unbounded with dead
+         * mob ids in long sessions where the player keeps the same aura.
+         */
+        long lastPruneTick = Long.MIN_VALUE;
         final Map<Integer, Set<MobEffect>> affectedTargets = new HashMap<>();
         /**
          * Instrument ID whose IM screen is currently open on this player's client.
@@ -54,6 +94,29 @@ public final class ImmersiveMelodiesAuraHandler {
         ResourceLocation screenOpenInstrumentId;
     }
 
+    /**
+     * 1.4.9 (RECS §2.6): players currently considered "actively using a mobile
+     * instrument". Source of truth for the per-tick scan loop — without this,
+     * {@link #onServerTick} would walk every player on the server every pulse
+     * even when nobody's playing an IM instrument. Membership is granted by
+     * {@link #onScreenOpened} (free-play path) and by the per-pulse discovery
+     * scan when an NBT-marked playing stack is found in either hand. Removed
+     * from the set on {@link #onScreenClosed} (when no held playing stack is
+     * found), {@link #onPlayerLogout}, and after {@code MOBILE_LINGER_TICKS}
+     * of idle.
+     */
+    private static final Set<UUID> ACTIVE_MOBILE_MUSICIANS = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * 1.4.9 (RECS §2.6): how often to do a full discovery scan for players
+     * with NBT-marked playing stacks who aren't in {@link #ACTIVE_MOBILE_MUSICIANS}
+     * yet (e.g. they triggered IM autoplay without ever opening an IM screen
+     * this session). Cheap — runs at the same cadence as the pulse interval
+     * but only every Nth pulse.
+     */
+    private static final int DISCOVERY_PULSE_INTERVAL = 4;
+    private static long lastDiscoveryGameTime = Long.MIN_VALUE;
+
     // --- Tick entry point (wired from InstrumentStateHandler) ---
 
     public static void onServerTick(ServerLevel level) {
@@ -64,18 +127,57 @@ public final class ImmersiveMelodiesAuraHandler {
         int pulse = EIServerConfig.MOBILE_PULSE_INTERVAL_TICKS.get();
         if (gameTime % pulse != 0) return;
 
-        for (ServerPlayer player : level.players()) {
-            tickPlayer(level, player, gameTime);
+        // 1.4.9 (RECS §2.6): scan only active mobile musicians, not every
+        // player on the level. Membership is granted by onScreenOpened (free-
+        // play path) and the periodic discovery scan below for the NBT-marked
+        // autoplay path. On a server with zero IM users this loop is empty.
+        if (!ACTIVE_MOBILE_MUSICIANS.isEmpty()) {
+            // Snapshot to a list — tickPlayer can call clearImmediate which
+            // removes from the set, ConcurrentModificationException-safe but
+            // we want stable iteration anyway.
+            for (UUID uuid : List.copyOf(ACTIVE_MOBILE_MUSICIANS)) {
+                ServerPlayer p = level.getServer() == null
+                        ? null
+                        : level.getServer().getPlayerList().getPlayer(uuid);
+                if (p == null || p.serverLevel() != level) continue;
+                tickPlayer(level, p, gameTime);
+            }
+        }
+
+        // Periodic discovery — pick up players who triggered IM autoplay
+        // without ever opening the IM screen this session. Once they're
+        // detected they get added to ACTIVE_MOBILE_MUSICIANS and the cheap
+        // path above takes over.
+        long pulsesPerDiscovery = (long) DISCOVERY_PULSE_INTERVAL * pulse;
+        if (gameTime - lastDiscoveryGameTime >= pulsesPerDiscovery) {
+            lastDiscoveryGameTime = gameTime;
+            for (ServerPlayer p : level.players()) {
+                if (ACTIVE_MOBILE_MUSICIANS.contains(p.getUUID())) continue;
+                if (ImmersiveMelodiesCompat.findActivePlayingStack(p) != null) {
+                    ACTIVE_MOBILE_MUSICIANS.add(p.getUUID());
+                    tickPlayer(level, p, gameTime);
+                }
+            }
         }
     }
 
     private static void tickPlayer(ServerLevel level, ServerPlayer player, long gameTime) {
         MobileAuraState state = STATES.computeIfAbsent(player.getUUID(), id -> new MobileAuraState());
 
+        // 1.4.9 (RECS §2.7): amortized prune of dead-entity ids from
+        // affectedTargets. Once a minute is plenty — the map only grows when
+        // mobs die mid-aura, and the cost of a missed prune is just a few
+        // extra hash buckets, not a correctness issue.
+        if (gameTime - state.lastPruneTick >= 1200) {
+            state.lastPruneTick = gameTime;
+            state.affectedTargets.keySet().removeIf(id -> level.getEntity(id) == null);
+        }
+
         // Suppression: stationary tier wins.
         if (EIServerConfig.SUPPRESS_MOBILE_WHEN_STATIONARY_ACTIVE.get()
                 && AuraManager.isActive(player.getUUID(), gameTime)) {
             clearImmediate(level, state);
+            ACTIVE_MOBILE_MUSICIANS.remove(player.getUUID());
             return;
         }
 
@@ -93,7 +195,7 @@ public final class ImmersiveMelodiesAuraHandler {
                 : resolveHeldStackFor(player, activeInstrumentId);
 
         if (activeInstrumentId == null) {
-            handleIdle(level, state, gameTime);
+            handleIdle(level, state, gameTime, player.getUUID());
             return;
         }
 
@@ -101,14 +203,14 @@ public final class ImmersiveMelodiesAuraHandler {
         // so the aura expires and the player isn't rewarded for a broken instrument.
         // IM's own sound pipeline is untouched — we don't try to block its audio.
         if (heldStack != null && InstrumentDurability.isBroken(heldStack)) {
-            handleIdle(level, state, gameTime);
+            handleIdle(level, state, gameTime, player.getUUID());
             return;
         }
 
         AuraPreset aura = MobileInstrumentAuraMapping.resolveFor(
                 player.getServer(), player.getUUID(), activeInstrumentId);
         if (aura == null) {
-            handleIdle(level, state, gameTime);
+            handleIdle(level, state, gameTime, player.getUUID());
             return;
         }
 
@@ -124,7 +226,7 @@ public final class ImmersiveMelodiesAuraHandler {
 
         if (aura.isOffensive() && !EIServerConfig.OFFENSIVE_AURAS_ENABLED.get()) {
             // Master kill switch — idle out instead of applying.
-            handleIdle(level, state, gameTime);
+            handleIdle(level, state, gameTime, player.getUUID());
             return;
         }
 
@@ -191,10 +293,24 @@ public final class ImmersiveMelodiesAuraHandler {
 
     /**
      * Player has no playing IM stack this pulse. Start (or continue) the linger
-     * countdown; once it expires, strip effects from tracked targets.
+     * countdown; once it expires, strip effects from tracked targets and drop
+     * them from the active-musician set so the per-tick scan stops hitting
+     * them. They'll be re-added by {@link #onScreenOpened} or the discovery
+     * scan if they pick the instrument back up.
      */
-    private static void handleIdle(ServerLevel level, MobileAuraState state, long gameTime) {
-        if (state.activeAura == null) return;
+    private static void handleIdle(ServerLevel level, MobileAuraState state, long gameTime, java.util.UUID playerId) {
+        if (state.activeAura == null) {
+            // No active aura AND no held playing stack AND no screen open
+            // (caller's invariant when calling this): drop the player from the
+            // active set after the linger window so the cheap-path scan
+            // doesn't churn on idle players.
+            int linger = EIServerConfig.MOBILE_LINGER_TICKS.get();
+            if (state.screenOpenInstrumentId == null
+                    && gameTime - state.lastActiveTick >= linger) {
+                ACTIVE_MOBILE_MUSICIANS.remove(playerId);
+            }
+            return;
+        }
 
         int linger = EIServerConfig.MOBILE_LINGER_TICKS.get();
         if (gameTime - state.lastActiveTick < linger) return;
@@ -207,6 +323,9 @@ public final class ImmersiveMelodiesAuraHandler {
         );
         state.activeAura = null;
         state.instrumentId = null;
+        if (state.screenOpenInstrumentId == null) {
+            ACTIVE_MOBILE_MUSICIANS.remove(playerId);
+        }
     }
 
     /** Immediate clear (suppression / explicit lifecycle clear), no linger. */
@@ -240,6 +359,8 @@ public final class ImmersiveMelodiesAuraHandler {
         state.screenOpenInstrumentId = instrumentId;
         // Nudge lastActiveTick so a just-opened screen doesn't immediately go idle.
         state.lastActiveTick = player.level().getGameTime();
+        // 1.4.9 (RECS §2.6): activate this player for the cheap-path tick scan.
+        ACTIVE_MOBILE_MUSICIANS.add(player.getUUID());
     }
 
     /** Client reported that the IM screen closed — drop the screen-open flag. */
@@ -249,11 +370,20 @@ public final class ImmersiveMelodiesAuraHandler {
         if (instrumentId.equals(state.screenOpenInstrumentId)) {
             state.screenOpenInstrumentId = null;
         }
+        // If the player closed the screen and isn't holding a playing stack
+        // either, drop them from the active set so the tick scan stops
+        // hitting them. handleIdle() will strip residual effects after the
+        // configured linger window.
+        if (state.screenOpenInstrumentId == null
+                && ImmersiveMelodiesCompat.findActivePlayingStack(player) == null) {
+            ACTIVE_MOBILE_MUSICIANS.remove(player.getUUID());
+        }
     }
 
     /** Drop all per-player state. Called on logout. No effect-strip needed — the player is gone. */
     public static void onPlayerLogout(UUID playerId) {
         STATES.remove(playerId);
+        LAST_OPEN_PACKET_TICK.remove(playerId);
     }
 
     /**

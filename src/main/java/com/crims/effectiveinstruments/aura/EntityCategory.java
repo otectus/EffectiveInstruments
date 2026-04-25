@@ -63,10 +63,13 @@ public enum EntityCategory {
             return OTHER_PLAYER;
         }
 
-        // Extra pet types (configured allowlist) — owner tracking varies per mod
-        // so we treat them as musician-owned only when the existing tame checks
-        // below don't already catch them. If the entity is a registered pet
-        // type but owner is unknown, fall through to passive/hostile.
+        // Extra pet types (configured allowlist) — for mobs whose mod doesn't
+        // expose a TamableAnimal-style ownership API we can't tell which player
+        // owns them. Bucket as PASSIVE_MOB (admin-domesticated) rather than
+        // OWN_PET, so positive auras still cover them when the positive
+        // allowlist enables PASSIVE_MOB. The actual extra-pet bucketing
+        // happens further down once the standard tame-by-anyone checks have
+        // run; the OWN_PET return below catches only TamableAnimal/AbstractHorse.
         if (isTamed) return OWN_PET;
 
         if (isTamedByOther(entity)) return OTHER_PLAYER_PET;

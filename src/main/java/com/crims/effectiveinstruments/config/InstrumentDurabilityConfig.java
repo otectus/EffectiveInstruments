@@ -2,6 +2,7 @@ package com.crims.effectiveinstruments.config;
 
 import com.crims.effectiveinstruments.EffectiveInstrumentsMod;
 import com.crims.effectiveinstruments.aura.AuraSchema;
+import com.crims.effectiveinstruments.util.ConfigIO;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
@@ -134,7 +135,7 @@ public final class InstrumentDurabilityConfig {
             addEntry(instruments, "immersive_melodies:ender_bass", 1600, "minecraft:ender_pearl", 320);
 
             root.add("instruments", instruments);
-            Files.writeString(file, GSON.toJson(root), StandardCharsets.UTF_8);
+            ConfigIO.writeAtomically(file, GSON.toJson(root));
             Files.createFile(marker);
 
             EffectiveInstrumentsMod.LOGGER.info("Generated default instrument durability mappings");

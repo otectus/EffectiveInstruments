@@ -15,11 +15,11 @@
     "tooltip.effectiveinstruments.tier.stationary": "Stationary tier",
     "tooltip.effectiveinstruments.tier.mobile": "Mobile tier",
     "tooltip.effectiveinstruments.compat.immersive_melodies": "Immersive Melodies compatibility active",
-    "tooltip.effectiveinstruments.compat.immersive_melodies.limitations": "Mobile buffs fire for autoplay / selected-melody playback only. Free-play keyboard/MIDI mode is not supported in 1.3.0.",
+    "tooltip.effectiveinstruments.compat.immersive_melodies.notes": "Mobile auras fire during autoplay, selected-melody playback, and free-play (any open IM screen).",
     "narration.effectiveinstruments.aura_button": "%s — %s",
     "narration.effectiveinstruments.aura_button.selected": "%s — Selected — %s",
     "message.effectiveinstruments.im_overlay_hold_required": "Hold an Immersive Melodies instrument to choose an aura",
     "message.effectiveinstruments.durability_low": "%s is nearly broken — repair it on an anvil soon",
     "message.effectiveinstruments.durability_broken": "%s is broken — repair it on an anvil to play again",
-    "tooltip.effectiveinstruments.aura_hint": "Right-click to open the aura selector (top-right)"
+    "tooltip.effectiveinstruments.aura_hint": "Open the instrument to choose an aura (top-right of the screen)"
 }
