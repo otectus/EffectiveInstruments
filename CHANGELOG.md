@@ -4,17 +4,6 @@ All notable changes to Effective Instruments will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [1.4.10] - 2026-04-25
-
-### Release
-- Promotes the 1.4.9 hotfix bundle (29 items across §1 critical / §2 major /
-  §3 polish from `RECOMMENDATIONS.md`) to a formal release. No functional
-  changes vs 1.4.9 — version bump exists to give the bundle a clean release
-  tag and to capture the long-form changelog migration from `CLAUDE.md`
-  (development-facing, dense) into this file (user-facing, Keep a Changelog
-  format).
-- See the 1.4.9 entry below for the full list of fixes.
-
 ## [1.4.9] - 2026-04-25
 
 ### Fixed

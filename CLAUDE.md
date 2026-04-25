@@ -3,7 +3,7 @@
 ## Quick Reference
 - **Mod ID**: `effectiveinstruments`
 - **Package**: `com.crims.effectiveinstruments`
-- **Version**: 1.4.10
+- **Version**: 1.4.9
 - **MC**: 1.20.1 | **Forge**: 47.3.0 | **Java**: 17
 - **Mappings**: Official
 
@@ -38,15 +38,6 @@
   repair material for `repairPerUnit` durability each.
 - **Admin subcommand** — `/effectiveinstruments durability {get|set <n>|repair}`
   operates on the main-hand (or off-hand) instrument.
-
-## 1.4.10 Release
-- **Release of the 1.4.9 hotfix bundle.** No functional changes vs 1.4.9.
-  Migrates the in-tree changelog from this file (development-facing) into
-  the user-facing `CHANGELOG.md` (Keep a Changelog format) and bumps the
-  published version so the bundle gets a clean release tag.
-- README.md updated: dropped the stale "free-play not supported in this
-  version" note (free-play has been supported since 1.4.3 — the lang
-  string and class docs were already cleaned up in 1.4.9).
 
 ## 1.4.9 Hotfix Set
 - **Durability fallback now actually fires.** `InstrumentDurability.resolveEntry`
