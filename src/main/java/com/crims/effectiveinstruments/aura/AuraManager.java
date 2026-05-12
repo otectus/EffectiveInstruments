@@ -39,8 +39,9 @@ public class AuraManager {
         final Deque<Long> recentNoteTicks = new ArrayDeque<>();
         /**
          * Mirrors the client's open-screen state for diagnostics; not load-
-         * bearing for aura activation. Set by the server-side
-         * InstrumentOpenStateChangedEvent handler, cleared on close. Reads in
+         * bearing for aura activation. Set by the backend-specific instrument-
+         * open event handler (e.g. {@code GenshinInstrumentEventHandler} when
+         * GI is installed), cleared on close. Reads in
          * /effectiveinstruments status + diagnose only — kept so future
          * reintroduction of a screen-state-aware feature has a hook ready.
          */
@@ -111,7 +112,7 @@ public class AuraManager {
         PlayerAuraState state = getOrCreate(player.getUUID());
         state.recordNote(player.level().getGameTime());
         // 1.4.7: ensure the player's in the tick-loop even if we missed the
-        // InstrumentOpenStateChangedEvent for some reason (old worlds, modded
+        // backend's instrument-open event for some reason (old worlds, modded
         // compat hiccups). onNotePlayed is a strong signal they're actually
         // playing, which is the whole point of activeMusicians.
         activeMusicians.add(player.getUUID());
@@ -139,8 +140,10 @@ public class AuraManager {
 
     /**
      * Authoritative "instrument opened" signal. Called only from the server-side
-     * {@link com.cstav.genshinstrument.event.InstrumentOpenStateChangedEvent} handler.
-     * Client packets can annotate state but must never set this flag directly.
+     * backend-specific instrument-open event handler — for Genshin Instruments
+     * that is {@code compat.genshin.GenshinInstrumentEventHandler}, registered
+     * conditionally when GI is installed. Client packets can annotate state but
+     * must never set this flag directly.
      */
     public static void onInstrumentOpen(Player player) {
         getOrCreate(player.getUUID()).instrumentOpen = true;

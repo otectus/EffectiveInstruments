@@ -64,9 +64,18 @@ repositories {
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
-    // Genshin Instruments — required dependency (Curse project 848761).
-    // File ID pinned in gradle.properties so version bumps touch one file.
-    implementation fg.deobf("curse.maven:genshin-instruments-${genshinstruments_project_id}:${genshinstruments_file_id}")
+    // Genshin Instruments — optional stationary-tier backend (Curse project 848761).
+    // 1.5.0: demoted from `implementation` to `compileOnly`. The runtime quarantine
+    // lives in `compat/genshin/`; absence at runtime is detected via ModList in
+    // GenshinInstrumentsCompat. File ID pinned in gradle.properties so version
+    // bumps touch one file.
+    compileOnly fg.deobf("curse.maven:genshin-instruments-${genshinstruments_project_id}:${genshinstruments_file_id}")
+
+    // Dev convenience: launch with Genshin Instruments at runtime when desired.
+    //   ./gradlew runClient -PdevRuntimeGenshin=true
+    if (project.findProperty("devRuntimeGenshin") == "true") {
+        runtimeOnly fg.deobf("curse.maven:genshin-instruments-${genshinstruments_project_id}:${genshinstruments_file_id}")
+    }
 
     // Even More Instruments — optional soft dependency (Curse project 898118).
     // compileOnly so the mod loads even when EMI is absent at runtime.

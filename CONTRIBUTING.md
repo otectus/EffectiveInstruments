@@ -7,10 +7,13 @@ so a few notes up front save everyone time.
 
 1. Clone the repo.
 2. `./gradlew build` — this pulls Genshin Instruments and Even More
-   Instruments from [Curse Maven](https://www.cursemaven.com/) on first run.
-   No local jars required.
-3. `./gradlew runClient` launches a dev client with both dependencies
-   pre-deobfuscated.
+   Instruments from [Curse Maven](https://www.cursemaven.com/) at compile
+   time only (both are `compileOnly` since 1.5.0). No local jars required.
+3. `./gradlew runClient` launches a dev client without Genshin Instruments
+   on the runtime classpath — useful for verifying the GI-absent code paths.
+4. `./gradlew runClient -PdevRuntimeGenshin=true` launches a dev client
+   with Genshin Instruments included at runtime so the stationary tier
+   actually works in-game.
 
 You need JDK 17 (Temurin recommended). The Gradle wrapper jar is
 committed, so `./gradlew` works out of the box.
@@ -18,6 +21,17 @@ committed, so `./gradlew` works out of the box.
 If you bump a dependency version, update the matching
 `_file_id` property in `gradle.properties`. Look up file ids at
 `https://www.curseforge.com/minecraft/mc-mods/<slug>/files`.
+
+### Backend-quarantine invariant
+
+Since 1.5.0, Genshin Instruments is an optional backend. Always-loaded
+classes must not import `com.cstav.genshinstrument.*`. The audit grep
+`grep -R "com.cstav.genshinstrument" src/main/java/` should return only
+matches in `compat/genshin/` (the quarantined event handler and the
+client-side reflection bridge). If you need to consume a new GI API,
+either extend `GenshinInstrumentEventHandler` or add a method to the
+reflection bridge — never import GI from a class that loads
+unconditionally.
 
 ## Scope
 

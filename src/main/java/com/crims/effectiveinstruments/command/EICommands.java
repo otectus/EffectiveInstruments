@@ -5,6 +5,7 @@ import com.crims.effectiveinstruments.aura.AuraRegistry;
 import com.crims.effectiveinstruments.aura.InstrumentAuraMapping;
 import com.crims.effectiveinstruments.aura.AuraJsonLoader;
 import com.crims.effectiveinstruments.aura.MobileInstrumentAuraMapping;
+import com.crims.effectiveinstruments.compat.genshin.GenshinInstrumentsCompat;
 import com.crims.effectiveinstruments.compat.immersivemelodies.ImmersiveMelodiesAuraHandler;
 import com.crims.effectiveinstruments.compat.immersivemelodies.ImmersiveMelodiesCompat;
 import com.crims.effectiveinstruments.config.EIServerConfig;
@@ -122,6 +123,19 @@ public final class EICommands {
      */
     private static int runDiagnose(CommandSourceStack source, ServerPlayer player) {
         source.sendSuccess(() -> Component.literal("=== EI Diagnose ===").withStyle(ChatFormatting.GOLD), false);
+
+        // 1.5.0: backend availability is the first thing to surface so users
+        // diagnosing "nothing fires" can rule out "no backend installed" in
+        // a single command instead of poking at logs.
+        source.sendSuccess(() -> Component.literal(
+                "Backends: genshin=" + (GenshinInstrumentsCompat.isAvailable() ? "active" : "absent")
+                        + " immersive_melodies=" + (ImmersiveMelodiesCompat.isAvailable() ? "active" : "absent")
+        ).withStyle(ChatFormatting.GRAY), false);
+        if (!GenshinInstrumentsCompat.isAvailable() && !ImmersiveMelodiesCompat.isAvailable()) {
+            source.sendSuccess(() -> Component.literal(
+                    "WARNING: no instrument backend installed — gameplay features inactive."
+            ).withStyle(ChatFormatting.YELLOW), false);
+        }
 
         ItemStack heldMain = player.getItemInHand(InteractionHand.MAIN_HAND);
         ItemStack heldOff = player.getItemInHand(InteractionHand.OFF_HAND);

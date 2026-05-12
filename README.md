@@ -1,6 +1,8 @@
 # Effective Instruments
 
-A Minecraft Forge 1.20.1 add-on mod for [Genshin Instruments](https://github.com/StavWasPlayZ/Genshin-Instruments) that adds an **aura while playing** system. Select a positive (buff) or negative (debuff) aura on any instrument screen — while you play notes, nearby allies receive beneficial potion effects, or nearby mobs take debuffs.
+A Minecraft Forge 1.20.1 mod that adds an **aura while playing** system to supported instrument backends. Select a positive (buff) or negative (debuff) aura — while you play notes, nearby allies receive beneficial potion effects, or nearby mobs take debuffs.
+
+As of 1.5.0, both [Genshin Instruments](https://github.com/StavWasPlayZ/Genshin-Instruments) (stationary screen-based instruments) and [Immersive Melodies](https://www.curseforge.com/minecraft/mc-mods/immersive-melodies) (mobile passive instruments) are **optional backends**. Install either one — or both — and Effective Instruments adapts. Without either, the mod loads cleanly, logs a warning, and waits.
 
 ## Features
 
@@ -11,10 +13,10 @@ A Minecraft Forge 1.20.1 add-on mod for [Genshin Instruments](https://github.com
 - **Broad offensive targeting by default** — offensive auras hit every mob in range except the musician, their own pets, and other players' pets. Per-category fine-grained knobs remain available for admins.
 - **Per-instrument memory** — manual aura overrides are remembered per-instrument within your session.
 - **Server-authoritative** — all effects applied server-side, no cheating.
-- **Automatic note detection** — hooks into Genshin Instruments' event API (both `NoteSoundPlayedEvent` and `HeldNoteSoundPlayedEvent`), no extra key presses needed.
+- **Automatic note detection** — hooks into the active backend's event API per-side (Genshin Instruments' `NoteSoundPlayedEvent` / `HeldNoteSoundPlayedEvent`, or the Immersive Melodies NBT/screen-open path). No extra key presses needed.
 - **Fully configurable** — radius, timing, targeting rules, durability, and per-aura overrides for both tiers.
-- **Compatible with Even More Instruments** — works on all instrument screens from both mods out of the box.
-- **Optional Immersive Melodies compatibility** — passive buffs while walking around playing IM instruments, no hard dependency.
+- **Compatible with Even More Instruments** — works on all EMI instrument screens (which extend Genshin Instruments) automatically.
+- **Optional backends** — Genshin Instruments and Immersive Melodies are both optional in 1.5.0. Run with either, both, or neither (the mod loads quietly with no backend, and `/effectiveinstruments diagnose` tells you what's installed).
 
 ## Aura Presets
 
@@ -158,13 +160,15 @@ See `_README_INSTRUMENTS.txt` in the config folder for all instrument IDs.
 
 ## Requirements
 
-| Dependency | Version | Required? |
-|------------|---------|-----------|
-| Minecraft | 1.20.1 | Yes |
-| Forge | 47.3.0+ | Yes |
-| Genshin Instruments | 5.0+ | Yes |
-| Even More Instruments | 6.0+ | No (optional) |
-| Immersive Melodies | 0.6.0+ | No (optional — enables mobile tier) |
+| Dependency | Version | Required? | Purpose |
+|------------|---------|-----------|---------|
+| Minecraft | 1.20.1 | Yes | Base game |
+| Forge | 47.3.0+ | Yes | Mod loader |
+| Genshin Instruments | 5.0+ | No | Enables stationary instrument-screen aura support |
+| Even More Instruments | 6.0+ | No | Adds more Genshin-style stationary instruments (requires GI) |
+| Immersive Melodies | 0.6.0+ | No | Enables mobile/passive instrument aura support |
+
+> Effective Instruments requires **at least one supported instrument backend** to provide gameplay functionality. Install Genshin Instruments for stationary screen-based instruments, Immersive Melodies for mobile instruments, or both. Without either, the mod loads but does nothing in-game; `/effectiveinstruments diagnose` will report `Backends: genshin=absent immersive_melodies=absent`.
 
 ## Configuration
 
@@ -280,6 +284,13 @@ the matching `_file_id` property in `gradle.properties`. File IDs are
 visible at `https://www.curseforge.com/minecraft/mc-mods/<slug>/files`
 (numeric id in the download URL).
 
+To launch a dev client with Genshin Instruments present at runtime
+(the dependency is `compileOnly` since 1.5.0):
+
+```bash
+./gradlew runClient -PdevRuntimeGenshin=true
+```
+
 ## Integration for Third-Party Instrument Mods
 
 The package `com.crims.effectiveinstruments.api` contains the stable
@@ -299,16 +310,17 @@ Everything else is internal and may change between releases.
 
 ## Technical Details
 
-- Subscribes to Genshin Instruments' `InstrumentPlayedEvent` for note detection — no custom note packets, no mixins
-- Subscribes to `InstrumentOpenStateChangedEvent` for instrument open/close tracking
-- Uses `InstrumentScreen.getInstrumentId()` to identify which instrument is being played
-- Three custom packets: `SelectAuraC2SPacket` (aura selection), `InstrumentOpenC2SPacket` (instrument ID), `SyncAuraSelectionS2CPacket` (server→client default sync)
-- Client overlay injected via `ScreenEvent.Init.Post` using `event.addListener()`
-- All Even More Instruments screens extend GI's `InstrumentScreen`, so `instanceof` detection covers both mods automatically
-- Night Vision aura uses 260-tick duration to avoid the vanilla flicker warning
-- **Immersive Melodies bridge** reads only `ModList.isLoaded` + vanilla `ItemStack` NBT (`playing` boolean) + Forge item registry — no IM classes imported, no reflection, no mixins. When IM is absent, the compat layer is a zero-cost no-op
-- **Dual-tier architecture**: shared `AuraApplicator` handles effect application, target gathering, and cleanup for both tiers. Mobile tier uses its own config group and separate mapping file
-- **Durability via NBT on foreign items**: the mod doesn't own any instrument `Item` classes, so `maxDamage` can't be set. Instead, durability is tracked under a custom NBT tag (`EIDurability`) with a `IItemDecorator` client-side for the visual bar
+- **Optional backend quarantine (1.5.0)** — Genshin Instruments is loaded only when `ModList.get().isLoaded("genshinstrument")` returns true at common-setup. The GI event handler (`compat/genshin/GenshinInstrumentEventHandler`) is the only class that imports `com.cstav.genshinstrument`; it is registered manually on the Forge event bus by the compat bootstrap. The client-side `GenshinInstrumentScreenBridge` uses `Class.forName` + cached `Method` lookups to detect GI instrument screens and read `getInstrumentId()` without compile-time references to GI types. Result: zero `NoClassDefFoundError` risk when GI is absent.
+- Subscribes to Genshin Instruments' `NoteSoundPlayedEvent` and `HeldNoteSoundPlayedEvent` for note detection — no custom note packets, no mixins.
+- Subscribes to `InstrumentOpenStateChangedEvent` for instrument open/close tracking.
+- Three custom packets: `SelectAuraC2SPacket` (aura selection), `InstrumentOpenC2SPacket` (instrument ID), `SyncAuraSelectionS2CPacket` (server→client default sync). The wire protocol version is unchanged in 1.5.0.
+- Client overlay injected via `ScreenEvent.Init.Post` using `event.addListener()`.
+- All Even More Instruments screens extend GI's instrument screen base class, so the GI-screen-bridge detection covers EMI when GI is also installed.
+- Night Vision aura uses 260-tick duration to avoid the vanilla flicker warning.
+- **Backend-agnostic note pipeline** — `StationaryInstrumentNoteService` owns the broken-state gate, polarity-aware durability damage, aura record + immediate-apply, and the per-player broken/low-durability message throttles. The GI event handler is a thin adapter that unwraps the GI event into a `ServerPlayer` + optional instrument id and delegates here.
+- **Immersive Melodies bridge** reads only `ModList.isLoaded` + vanilla `ItemStack` NBT (`playing` boolean) + Forge item registry — no IM classes imported, no reflection, no mixins. When IM is absent, the compat layer is a zero-cost no-op.
+- **Dual-tier architecture**: shared `AuraApplicator` handles effect application, target gathering, and cleanup for both tiers. Mobile tier uses its own config group and separate mapping file.
+- **Durability via NBT on foreign items**: the mod doesn't own any instrument `Item` classes, so `maxDamage` can't be set. Instead, durability is tracked under a custom NBT tag (`EIDurability`) with a `IItemDecorator` client-side for the visual bar.
 
 ## License
 

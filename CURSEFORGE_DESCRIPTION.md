@@ -1,6 +1,12 @@
 # Effective Instruments
 
-**Play music. Empower allies. Or curse your enemies.** Effective Instruments adds a magical aura system to [Genshin Instruments](https://www.curseforge.com/minecraft/mc-mods/genshin-instruments), letting musicians grant potion effects to nearby players and tamed pets while they perform — or, if they pick the negative-polarity variant, inflict debuffs on nearby mobs. Every instrument has its own unique positive *and* offensive aura — pick up a Windsong Lyre and feel the breeze quicken your step (positive) or call down a howling gale that slows and weakens every foe in range (offensive).
+**Play music. Empower allies. Or curse your enemies.** Effective Instruments adds a magical aura system to your favorite instrument mod, letting musicians grant potion effects to nearby players and tamed pets while they perform — or, if they pick the negative-polarity variant, inflict debuffs on nearby mobs. Every instrument has its own unique positive *and* offensive aura — pick up a Windsong Lyre and feel the breeze quicken your step (positive) or call down a howling gale that slows and weakens every foe in range (offensive).
+
+**New in 1.5.0:**
+- **Genshin Instruments is now optional!** Effective Instruments works with [Genshin Instruments](https://www.curseforge.com/minecraft/mc-mods/genshin-instruments) (stationary screen-based instruments), [Immersive Melodies](https://www.curseforge.com/minecraft/mc-mods/immersive-melodies) (mobile passive instruments), or both. Pick whichever backend you prefer — the mod adapts.
+- **Standalone Immersive Melodies mode** — install just IM and Effective Instruments, no GI required, and the mobile aura tier works as expected.
+- **`/effectiveinstruments diagnose`** now reports backend availability up-front, so admins can verify which backends are detected without reading logs.
+- **Dependency quarantine** — GI's class loading is fully isolated behind a compat layer. No `NoClassDefFoundError` when GI is missing.
 
 **New in 1.4.x:**
 - **Offensive (negative) auras** — every instrument gets a mirrored debuff variant (Wither, Poison, Slowness, Blindness, etc.). Pick the red-bordered icon to swap polarities on the fly.
@@ -274,10 +280,12 @@ Particle rendering is entirely client-side. If particles cause performance issue
 
 ## Compatibility
 
-- **Genshin Instruments** (required) — all instrument screens are automatically detected
-- **Even More Instruments** (optional) — all EMI screens extend Genshin Instruments' `InstrumentScreen` and are automatically supported, including all 16 Note Block Instrument variants
-- **Immersive Melodies** (optional, new in 1.3.0) — enables mobile passive tier. No IM classes imported, no reflection, no mixins. When IM is absent the compat layer is a zero-cost no-op
-- **Other instrument mods** — use the `screenClassAllowlist` client config to add support for screens from mods that don't extend `InstrumentScreen`
+- **Genshin Instruments** (optional, since 1.5.0) — enables stationary screen-based instrument auras. All instrument screens are automatically detected via a reflection bridge that requires zero compile-time GI references.
+- **Even More Instruments** (optional, requires GI) — all EMI screens extend Genshin Instruments' instrument screen and are automatically supported, including all 16 Note Block Instrument variants.
+- **Immersive Melodies** (optional, since 1.3.0) — enables mobile passive tier. No IM classes imported, no reflection, no mixins. When IM is absent the compat layer is a zero-cost no-op.
+- **Other instrument mods** — use the `screenClassAllowlist` client config to add support for screens from mods that don't extend Genshin Instruments' instrument screen base class.
+
+> **Backend requirement:** Effective Instruments needs at least one supported backend (Genshin Instruments and/or Immersive Melodies) to provide gameplay functionality. Without either, the mod loads cleanly and logs a warning, but no auras fire.
 
 Effects from other mods (potion effects, beacons, etc.) are never stripped or overwritten unless the aura provides a stronger or equal version.
 
@@ -287,18 +295,19 @@ Effects from other mods (potion effects, beacons, etc.) are never stripped or ov
 
 - **Minecraft** 1.20.1
 - **Forge** 47+
-- **Genshin Instruments** 5.0+
-- *Optional:* Even More Instruments 6.0+
-- *Optional:* Immersive Melodies 0.6.0+ (enables mobile tier)
+- *At least one of:*
+  - Genshin Instruments 5.0+ (stationary screen-based instruments)
+  - Immersive Melodies 0.6.0+ (mobile passive instruments)
+- *Optional:* Even More Instruments 6.0+ (requires Genshin Instruments)
 
 ---
 
 ## Quick Start
 
-1. Install the mod alongside Genshin Instruments.
-2. Open any instrument in-game. Its unique aura auto-selects and the corresponding button appears in the top-right corner.
-3. Start playing. Nearby allies will receive the buff.
-4. *(Optional)* Install Immersive Melodies. Hold an IM instrument and start a melody — passive buffs activate automatically.
-5. To customize auras, edit the JSON files in `config/effective_instruments/auras/`.
-6. To change instrument mappings, edit the mapping files in `config/effective_instruments/`.
-7. Use `/effectiveinstruments reload` to apply changes without restarting.
+1. Install the mod alongside at least one supported backend — Genshin Instruments (stationary), Immersive Melodies (mobile), or both.
+2. **Stationary tier (GI):** Open any instrument in-game. Its unique aura auto-selects and the corresponding button appears in the top-right corner. Start playing — nearby allies receive the buff.
+3. **Mobile tier (IM):** Hold an Immersive Melodies instrument and start a melody (or use free-play). A passive aura buff applies to you and nearby allies every pulse.
+4. To customize auras, edit the JSON files in `config/effective_instruments/auras/`.
+5. To change instrument mappings, edit the mapping files in `config/effective_instruments/`.
+6. Use `/effectiveinstruments reload` to apply changes without restarting.
+7. Run `/effectiveinstruments diagnose` to confirm which backends the server detected.

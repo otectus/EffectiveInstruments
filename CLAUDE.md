@@ -3,22 +3,73 @@
 ## Quick Reference
 - **Mod ID**: `effectiveinstruments`
 - **Package**: `com.crims.effectiveinstruments`
-- **Version**: 1.4.9
+- **Version**: 1.5.0
 - **MC**: 1.20.1 | **Forge**: 47.3.0 | **Java**: 17
 - **Mappings**: Official
 
 ## Build
 - `./gradlew build` — full build
 - `./gradlew compileJava` — compile-only
+- `./gradlew runClient -PdevRuntimeGenshin=true` — dev client with GI present at runtime
+  (since 1.5.0 GI is `compileOnly`; the default `runClient` exercises the GI-absent path)
 
 ## Key Dependencies
-- **Genshin Instruments** 5.0 — required; instrument framework
-- **Even More Instruments** 6.1.4 — optional soft dependency (compileOnly)
+- **Genshin Instruments** 5.0 — **optional** stationary-tier backend (compileOnly since 1.5.0).
+  Loaded only when `ModList.get().isLoaded("genshinstrument")` returns true at common-setup;
+  the GI event handler in `compat/genshin/` is the only class that imports
+  `com.cstav.genshinstrument.*`.
+- **Immersive Melodies** 0.6.0+ — optional mobile-tier backend (compileOnly).
+  Bridge in `compat/immersivemelodies/` reads only ModList + NBT + registry IDs; no IM
+  classes are imported anywhere.
+- **Even More Instruments** 6.1.4 — optional soft dependency (compileOnly). Requires GI
+  at runtime since EMI screens extend GI's instrument screen.
 
 ## Notes
-- Aura effects while playing instruments from Genshin Instruments
-- Instrument jars loaded from local `Dependencies/` directory
-- No mixins
+- Aura effects while playing supported modded instruments. Both Genshin Instruments and
+  Immersive Melodies are optional backends as of 1.5.0; install either, both, or neither.
+- Instrument jars loaded from Curse Maven (`https://cursemaven.com`) on first build.
+- No mixins.
+
+## 1.5.0 Feature Set
+- **Genshin Instruments demoted to optional backend.** `mods.toml` now declares
+  `mandatory=false` for `genshinstrument`, and `build.gradle` switched
+  `implementation` → `compileOnly`. The mod loads cleanly with only Immersive
+  Melodies installed, or with no instrument backend at all (warns once at startup).
+- **Dependency quarantine.** Three always-loaded classes used to import GI directly:
+  `event/NoteActivityHandler`, `event/InstrumentStateHandler`, and
+  `client/event/AuraOverlayInjector`. v1.5.0 reorganizes:
+  - `event/NoteActivityHandler` deleted; its shared logic moved into
+    `event/StationaryInstrumentNoteService` (no GI imports — owns the broken-state
+    gate, polarity-aware durability, broken/low-durability throttle maps, and the
+    per-player logout cleanup).
+  - `event/InstrumentStateHandler` stripped of its GI handler; only generic Forge
+    events remain (`onLevelTick`, `onPlayerLogout`, `onPlayerChangedDimension`,
+    `onPlayerDeath`).
+  - `client/event/AuraOverlayInjector` no longer imports GI's `InstrumentScreen`.
+    Detection routes through `compat/genshin/client/GenshinInstrumentScreenBridge`
+    (lazy `Class.forName` + cached `Method` lookup, with a `resolutionAttempted`
+    flag to short-circuit failures without log spam).
+- **`compat/genshin/` package.** Mirrors the existing `compat/immersivemelodies/`
+  layout. `GenshinInstrumentsCompat.initCommon()` runs at common-setup, calls
+  `MinecraftForge.EVENT_BUS.register(GenshinInstrumentEventHandler.class)` only when
+  GI is loaded. The handler holds the three GI-typed `@SubscribeEvent` static
+  methods (`onNoteSoundPlayed`, `onHeldNoteSoundPlayed`, `onInstrumentStateChanged`)
+  — the only class in the codebase with `com.cstav.genshinstrument` imports.
+- **Backend-availability section in `/effectiveinstruments diagnose`.** First line of
+  the dump: `Backends: genshin=active|absent immersive_melodies=active|absent`. When
+  neither is installed, follows up with a yellow WARNING line.
+- **Dual-absence warning at startup.** `EffectiveInstrumentsMod.commonSetup` logs
+  `WARN` if neither backend is detected: *"No supported instrument backend detected.
+  Install Genshin Instruments or Immersive Melodies…"*.
+- **Audit invariant.** A grep audit of `com.cstav.genshinstrument` against
+  `src/main/java/` should return only `compat/genshin/GenshinInstrumentEventHandler.java`
+  (4 imports) and `compat/genshin/client/GenshinInstrumentScreenBridge.java` (1 FQN
+  string literal). Always-loaded classes must never reference GI types.
+- **Wire protocol unchanged.** `EIPacketHandler.PROTOCOL_VERSION` stays at `4`. No
+  packet shape changed; v1.4.x clients connect to v1.5.0 servers cleanly.
+- **Mod description broadened.** `gradle.properties:23` now reads *"Aura effects
+  while playing supported modded instruments, including Genshin Instruments and
+  Immersive Melodies"*.
 
 ## 1.4.0 Feature Set
 - **Offensive auras** — every instrument now has a second "negative polarity" preset

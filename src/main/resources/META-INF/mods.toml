@@ -25,7 +25,7 @@ description='''${mod_description}'''
 
 [[dependencies.${mod_id}]]
     modId="genshinstrument"
-    mandatory=true
+    mandatory=false
     versionRange="[5.0,)"
     ordering="AFTER"
     side="BOTH"

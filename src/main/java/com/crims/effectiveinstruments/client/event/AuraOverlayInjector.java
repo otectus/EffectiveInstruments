@@ -6,11 +6,11 @@ import com.crims.effectiveinstruments.aura.AuraRegistry;
 import com.crims.effectiveinstruments.aura.InstrumentAuraMapping;
 import com.crims.effectiveinstruments.aura.MobileInstrumentAuraMapping;
 import com.crims.effectiveinstruments.client.widget.AuraSelectorWidget;
+import com.crims.effectiveinstruments.compat.genshin.client.GenshinInstrumentScreenBridge;
 import com.crims.effectiveinstruments.config.EIClientConfig;
 import com.crims.effectiveinstruments.network.EIPacketHandler;
 import com.crims.effectiveinstruments.network.packet.InstrumentOpenC2SPacket;
 import com.crims.effectiveinstruments.network.packet.SelectAuraC2SPacket;
-import com.cstav.genshinstrument.client.gui.screen.instrument.partial.InstrumentScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -39,8 +39,11 @@ import java.util.Set;
  * Supports two categories of screen:
  * <ul>
  *   <li><b>Stationary instruments</b> — Genshin Instruments (and compat
- *       mods like Even More Instruments) via {@link InstrumentScreen}.
- *       Selections route through {@link InstrumentAuraMapping} and
+ *       mods like Even More Instruments). GI screens are detected via the
+ *       reflection-based {@link GenshinInstrumentScreenBridge} so this class
+ *       holds no compile-time reference to GI types — required for v1.5.0's
+ *       optional-backend stance. Selections route through
+ *       {@link InstrumentAuraMapping} and
  *       {@link com.crims.effectiveinstruments.aura.AuraManager}.</li>
  *   <li><b>Mobile instruments</b> — Immersive Melodies' two screens, detected
  *       by class-name string match so we don't hard-import an optional mod.
@@ -110,8 +113,9 @@ public class AuraOverlayInjector {
 
         Screen screen = event.getScreen();
 
-        boolean isStationary = screen instanceof InstrumentScreen
-                || EIClientConfig.SCREEN_CLASS_ALLOWLIST.get().contains(screen.getClass().getName());
+        boolean isGenshinStationary = GenshinInstrumentScreenBridge.isInstrumentScreen(screen);
+        boolean isAllowlistedStationary = EIClientConfig.SCREEN_CLASS_ALLOWLIST.get().contains(screen.getClass().getName());
+        boolean isStationary = isGenshinStationary || isAllowlistedStationary;
         boolean isMobile = IM_SCREEN_CLASSES.contains(screen.getClass().getName());
 
         if (!isStationary && !isMobile) return;
@@ -133,17 +137,26 @@ public class AuraOverlayInjector {
 
         List<AuraPreset> allowed;
         currentIsMobileTier = false;
-        if (screen instanceof InstrumentScreen instrumentScreen) {
-            currentInstrumentId = instrumentScreen.getInstrumentId();
-            EIPacketHandler.sendToServer(
-                    new InstrumentOpenC2SPacket(currentInstrumentId, /* mobileTier */ false)
-            );
-            String override = instrumentAuraOverrides.get(currentInstrumentId);
-            if (override != null) {
-                currentSelectedAuraId = override;
-                EIPacketHandler.sendToServer(new SelectAuraC2SPacket(override));
+        if (isGenshinStationary) {
+            currentInstrumentId = GenshinInstrumentScreenBridge.getInstrumentId(screen);
+            if (currentInstrumentId != null) {
+                EIPacketHandler.sendToServer(
+                        new InstrumentOpenC2SPacket(currentInstrumentId, /* mobileTier */ false)
+                );
+                String override = instrumentAuraOverrides.get(currentInstrumentId);
+                if (override != null) {
+                    currentSelectedAuraId = override;
+                    EIPacketHandler.sendToServer(new SelectAuraC2SPacket(override));
+                }
             }
+            // currentInstrumentId may stay null if reflection failed — the
+            // mapping lookup below tolerates null and returns the global
+            // allow-list fallback.
         }
+        // Allowlist-only stationary screens (no GI involvement) keep
+        // currentInstrumentId at whatever its prior value was; that mirrors
+        // the pre-1.5 behavior where third-party stationary screens never
+        // populated an id either.
         allowed = InstrumentAuraMapping.getAllowedAuras(currentInstrumentId);
 
         stationaryOverlayScreen = screen;

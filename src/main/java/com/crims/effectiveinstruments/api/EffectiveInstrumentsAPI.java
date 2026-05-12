@@ -27,11 +27,10 @@ import javax.annotation.Nullable;
 public final class EffectiveInstrumentsAPI {
 
     /**
-     * Marks the player as having opened an instrument screen. Equivalent
-     * to the server-side {@code InstrumentOpenStateChangedEvent} that
-     * Genshin Instruments fires — this is the authoritative "open" signal
-     * that permits aura activation. Call this from your mod's server-side
-     * instrument-open handler.
+     * Marks the player as having opened an instrument screen. This is the
+     * authoritative "open" signal that permits aura activation — equivalent
+     * to whatever instrument-open event your backend emits. Call this from
+     * your mod's server-side instrument-open handler.
      */
     public static void notifyInstrumentOpen(ServerPlayer player) {
         AuraManager.onInstrumentOpen((Player) player);

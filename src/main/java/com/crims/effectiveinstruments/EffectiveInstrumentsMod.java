@@ -2,6 +2,7 @@ package com.crims.effectiveinstruments;
 
 import com.crims.effectiveinstruments.aura.AuraRegistry;
 import com.crims.effectiveinstruments.command.EICommands;
+import com.crims.effectiveinstruments.compat.genshin.GenshinInstrumentsCompat;
 import com.crims.effectiveinstruments.compat.immersivemelodies.ImmersiveMelodiesCompat;
 import com.crims.effectiveinstruments.config.EIClientConfig;
 import com.crims.effectiveinstruments.config.EIServerConfig;
@@ -61,7 +62,16 @@ public class EffectiveInstrumentsMod {
             // are deferred to ServerAboutToStartEvent — see #1.2 in
             // RECOMMENDATIONS.md. Forge SERVER configs are not loaded yet.
             AuraRegistry.loadPresetsAndMappings();
+            // 1.5.0: Genshin Instruments and Immersive Melodies are now both
+            // optional backends. Each compat init is a no-op when its mod is
+            // absent; the dual-absence warn below tells admins to install one
+            // of them so EI's gameplay features actually do something.
+            GenshinInstrumentsCompat.initCommon();
             ImmersiveMelodiesCompat.init();
+            if (!GenshinInstrumentsCompat.isAvailable() && !ImmersiveMelodiesCompat.isAvailable()) {
+                LOGGER.warn("No supported instrument backend detected. Install Genshin Instruments " +
+                        "or Immersive Melodies to activate Effective Instruments gameplay features.");
+            }
         });
     }
 

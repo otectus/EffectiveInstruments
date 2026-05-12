@@ -4,6 +4,87 @@ All notable changes to Effective Instruments will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-05-09
+
+### Changed
+- **Genshin Instruments is now an optional backend.** Previously the mod
+  hard-required GI (`mandatory=true` in `mods.toml`, `implementation`-scoped
+  in `build.gradle`) — users who wanted only Immersive Melodies mobile
+  support had no path. 1.5.0 demotes GI to `compileOnly` /
+  `mandatory=false`, on the same conceptual footing as IM. All four runtime
+  combinations now work:
+    1. EI + GI only — existing stationary behavior unchanged.
+    2. EI + IM only — mobile tier works without GI installed (new).
+    3. EI + GI + IM — both tiers work.
+    4. EI alone — mod loads cleanly, logs a warning that no backend is
+       installed, commands and configs still work.
+- **Mod description broadened** to reflect dual-backend support: *"Aura
+  effects while playing supported modded instruments, including Genshin
+  Instruments and Immersive Melodies"*.
+
+### Added
+- **`compat/genshin/GenshinInstrumentsCompat`** — bootstrap that detects
+  Genshin Instruments via `ModList.get().isLoaded` at common-setup and
+  manually registers the GI event handler only when GI is present. Mirrors
+  the existing `ImmersiveMelodiesCompat` pattern.
+- **`compat/genshin/GenshinInstrumentEventHandler`** — the only class that
+  imports `com.cstav.genshinstrument.*`. Registered manually (no
+  `@Mod.EventBusSubscriber`); never linked when GI is absent. Holds the
+  three previously-scattered GI handlers: `onNoteSoundPlayed`,
+  `onHeldNoteSoundPlayed`, `onInstrumentStateChanged`.
+- **`compat/genshin/client/GenshinInstrumentScreenBridge`** — reflection-
+  based client bridge for GI's `InstrumentScreen`. Uses `Class.forName` +
+  cached `Method` lookups behind an `isAvailable` gate so the client
+  overlay holds zero compile-time references to GI types. Lazy-resolves on
+  first use, caches success/failure to keep the hot path branch-free.
+- **`event/StationaryInstrumentNoteService`** — backend-agnostic note
+  pipeline. Owns the broken-state gate, polarity-aware durability damage,
+  aura record + immediate-apply, and per-player broken/low-durability
+  message throttles. The GI event handler now delegates here; any future
+  backend can do the same without touching GI-specific code.
+- **`/effectiveinstruments diagnose` Backends section.** New first line of
+  the diagnose dump: `Backends: genshin=active|absent immersive_melodies=
+  active|absent`. When neither is installed, follows up with a yellow
+  WARNING line. Answers "is the backend even loaded?" without trawling the
+  log.
+- **Dev runtime toggle.** `./gradlew runClient -PdevRuntimeGenshin=true`
+  pulls GI as `runtimeOnly` for local testing. The default `runClient`
+  exercises the GI-absent path.
+
+### Removed
+- **`event/NoteActivityHandler`** — fully replaced by
+  `StationaryInstrumentNoteService` (shared logic) and
+  `GenshinInstrumentEventHandler` (GI-specific subscription). The throttle
+  maps and per-player logout cleanup moved to the service alongside the
+  broken/low warnings they belong with.
+- **GI imports from `event/InstrumentStateHandler`** — the
+  `onInstrumentStateChanged` handler and its `isHoldingBrokenInstrument`
+  helper moved into `GenshinInstrumentEventHandler`. The class is now
+  100 % backend-agnostic; `onLevelTick`, `onPlayerLogout`,
+  `onPlayerChangedDimension`, `onPlayerDeath` remain.
+- **GI import from `client/event/AuraOverlayInjector`** — replaced by the
+  `GenshinInstrumentScreenBridge` reflection layer. The `instanceof
+  InstrumentScreen` check became `GenshinInstrumentScreenBridge.isInstrumentScreen(screen)`,
+  and `instrumentScreen.getInstrumentId()` became
+  `GenshinInstrumentScreenBridge.getInstrumentId(screen)` with null-safe
+  handling for the failure case.
+
+### Fixed
+- **Javadoc references to `com.cstav.genshinstrument.event.*` removed**
+  from `AuraManager` and `EffectiveInstrumentsAPI`. The wording now
+  describes the abstract "backend instrument-open event signal" rather
+  than naming a class that may not be present at javadoc-generation time.
+
+### Notes for server admins
+- The packet protocol version is **unchanged** at `4`. v1.4.x clients
+  connect to v1.5.0 servers cleanly and vice versa.
+- **Behavior change:** if your server is currently running v1.4.x with
+  Genshin Instruments installed, no migration is needed — the v1.5.0 jar
+  detects GI exactly as before and runs the stationary tier.
+- **New deployment option:** servers that don't want GI installed can now
+  ship just Effective Instruments + Immersive Melodies and get the mobile
+  tier, no GI jar required.
+
 ## [1.4.9] - 2026-04-25
 
 ### Fixed
