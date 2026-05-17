@@ -3,7 +3,7 @@
 ## Quick Reference
 - **Mod ID**: `effectiveinstruments`
 - **Package**: `com.crims.effectiveinstruments`
-- **Version**: 1.5.0
+- **Version**: 1.6.0
 - **MC**: 1.20.1 | **Forge**: 47.3.0 | **Java**: 17
 - **Mappings**: Official
 
@@ -546,6 +546,60 @@
   replaced a two-branch implementation with a single-loop classifier that
   buckets candidates by category and emits in priority order
   (musician → own pets → other players → …).
+
+## 1.6.0 Architecture (NPC compatibility)
+
+The 1.6.0 release generalizes EI from a player-only aura framework to a generic
+`LivingEntity` framework, then layers nine per-mod NPC adapters on top.
+
+- **Performer abstraction** lives under `performer/`. `IAuraPerformer` wraps
+  any `LivingEntity` (player or NPC) and exposes
+  owner/team/faction/instrument/aura-id/tier in one contract. Every internal
+  caller routes through `PerformerRegistry.wrap(entity, tier)` which short-
+  circuits to `PlayerPerformer` for `ServerPlayer` and walks ServiceLoader-
+  discovered `PerformerAdapterProvider`s for NPCs.
+- **Tier-1 NPC adapters** live under `compat/<modid>/` with a uniform shape:
+  `<Mod>Compat` (bootstrap, registers Forge bus listener + OwnerProvider /
+  FactionProvider), `<Mod>Reflection` (cached `Method` accessors with
+  `Class.forName` gates), `<Mod>Performer` (IAuraPerformer impl),
+  `<Mod>InstrumentGoal extends PlayInstrumentGoal`, `<Mod>EventHandler`
+  (`EntityJoinLevelEvent` goal injection + `LivingDeathEvent` cleanup),
+  `<Mod>PerformerAdapter` (ServiceLoader entry).
+- **Reflection style.** All NPC adapter reflection uses
+  `Class.forName` + plain `java.lang.reflect.Method.invoke` (NOT
+  `MethodHandles.publicLookup`). The publicLookup pipeline silently fails to
+  resolve inherited / vanilla methods across Forge's class transformer; plain
+  reflection with `setAccessible(true)` works unconditionally. For vanilla
+  methods on instances of vanilla classes (e.g., `TamableAnimal.isInSittingPose`),
+  prefer direct bytecode `instanceof` + method call over reflection — that's
+  what existing 1.5.0 code does for `TamableAnimal.isTame` / `getOwnerUUID`.
+- **Audit invariant.** `checkCompatAuditInvariant` gradle task enforces that
+  classes outside `compat/<modid>/` never import the target mod's runtime
+  types. Wired into `check` lifecycle; CI fails on violation.
+- **NPC aura-auto-selection.** NPCs have no UI to set a selected aura.
+  `AuraManager.onNotePlayed(IAuraPerformer)` auto-pins the held instrument's
+  `InstrumentAuraMapping.getDefaultAuraId(itemId)` to the NPC's state.
+  `PlayInstrumentGoal.currentPreset()` has the same fallback at the goal
+  level for first-tick race safety.
+- **Mobile-NPC ticks.** Tier-1 NPC performers with IM-mapped instruments
+  auto-register into `ImmersiveMelodiesAuraHandler.ACTIVE_MOBILE_NPCS` via
+  `PlayInstrumentGoal.start()`. The IM tick loop's `tickPerformer` handles
+  mobile-tier aura application.
+- **MCA spouse-as-owner.** `MCAOwnerProvider` reads
+  `EntityRelationship.of(villager).getPartnerUUID()` and surfaces it through
+  the global `OwnerResolver`. A married villager classifies as OWN_PET of the
+  spouse-player when that player performs a positive aura. MCA is also a
+  Tier-1 performer — villagers can play instruments themselves (`MCAPerformer`
+  + `MCAInstrumentGoal`).
+- **The `forge.` prefix.** Architectury universal jars preserve their
+  `forge.` / `fabric.` / `quilt.` prefixes at runtime. MCA classes live at
+  `forge.net.mca.entity.*` — adapter reflection probes both prefixed and
+  bare candidates via a `firstLoadable(String[])` helper for forward-compat.
+- **Diagnostics.** `/effectiveinstruments npcs adapters | list [radius] [all]
+  | diagnose <entity>`. The diagnose command shows owner + JSON override +
+  target-side classification when the entity isn't wrappable as a performer,
+  so the user can verify spouse-as-owner / classification overrides without
+  needing to log effects.
 
 ## Migration Notes (1.3.x → 1.4.0)
 - Instrument mapping files auto-migrate string-form entries to object form

@@ -1,5 +1,7 @@
 package com.crims.effectiveinstruments.aura;
 
+import com.crims.effectiveinstruments.performer.IAuraPerformer;
+import com.crims.effectiveinstruments.performer.TargetClassifier;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
@@ -39,6 +41,19 @@ public enum EntityCategory {
     IRON_GOLEM,
     PASSIVE_MOB,
     HOSTILE_MOB;
+
+    /**
+     * 1.6.0: performer-aware overload. Routes through {@link TargetClassifier}
+     * which adds adapter hint + tag/JSON precedence (Phase 1+) before falling
+     * back to the player-aware path below. When {@code performer} wraps a
+     * {@link ServerPlayer}, the output is byte-identical to the legacy
+     * {@link #classify(ServerPlayer, Entity, Set)}.
+     */
+    public static EntityCategory classify(
+            IAuraPerformer performer, Entity entity, Set<ResourceLocation> extraPetTypes
+    ) {
+        return TargetClassifier.classify(entity, performer, extraPetTypes);
+    }
 
     /**
      * Classify a candidate entity relative to {@code source}. Pass the cached

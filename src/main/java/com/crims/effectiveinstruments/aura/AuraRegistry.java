@@ -89,6 +89,10 @@ public final class AuraRegistry {
     public static void refreshConfigDerived() {
         AuraApplicator.invalidatePetAllowlistCache();
         com.crims.effectiveinstruments.durability.InstrumentDurability.invalidateEntryCache();
+        // 1.6.0 Phase 1: load the entity classification overrides JSON. Safe
+        // to call here because it does not depend on SERVER config values —
+        // only on the entity-type registry (which is populated by this point).
+        com.crims.effectiveinstruments.data.EntityClassificationLoader.load();
     }
 
     public static void reload() {

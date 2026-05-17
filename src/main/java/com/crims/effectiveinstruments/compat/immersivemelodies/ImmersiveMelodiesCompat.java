@@ -5,6 +5,7 @@ import com.crims.effectiveinstruments.aura.MobileInstrumentAuraMapping;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -67,9 +68,18 @@ public final class ImmersiveMelodiesCompat {
      */
     @Nullable
     public static HeldInstrument findActivePlayingStack(ServerPlayer player) {
+        return findActivePlayingStack((LivingEntity) player);
+    }
+
+    /**
+     * 1.6.0: entity-generic overload. {@code getHandSlots()} lives on
+     * {@link LivingEntity}, so the same iteration applies to NPC performers.
+     */
+    @Nullable
+    public static HeldInstrument findActivePlayingStack(LivingEntity entity) {
         if (!available) return null;
 
-        for (ItemStack stack : player.getHandSlots()) {
+        for (ItemStack stack : entity.getHandSlots()) {
             if (stack.isEmpty()) continue;
             ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(stack.getItem());
             if (itemId == null) continue;

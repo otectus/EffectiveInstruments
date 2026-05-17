@@ -4,6 +4,34 @@ A Minecraft Forge 1.20.1 mod that adds an **aura while playing** system to suppo
 
 As of 1.5.0, both [Genshin Instruments](https://github.com/StavWasPlayZ/Genshin-Instruments) (stationary screen-based instruments) and [Immersive Melodies](https://www.curseforge.com/minecraft/mc-mods/immersive-melodies) (mobile passive instruments) are **optional backends**. Install either one — or both — and Effective Instruments adapts. Without either, the mod loads cleanly, logs a warning, and waits.
 
+## New in 1.6.0 — Multi-mod NPC compatibility
+
+Effective Instruments now generalizes from a player-only aura framework to a *generic LivingEntity* framework. Supported NPC mods can drive the aura pipeline themselves: hand a Touhou Maid a Windsong Lyre and she'll play it and apply the aura; equip a Recruits soldier with a flute and he'll perform between combats; an MCA villager can serenade her spouse.
+
+**Supported NPC mods (9 adapters, all optional):**
+
+| Mod | Tier | What it does |
+|---|---|---|
+| Recruits (`recruits`) | 1 | Plays during idle; reflection-cached owner / inventory / fleeing / should-rest gates |
+| Guard Villagers (`guardvillagers`) | 1 | Plays when a Hero of the Village player is nearby; combat-priority 5 |
+| Easy NPC (`easy_npc`) | 1 | `EasyNPC` marker interface; owner via `OwnableEntity` vanilla path |
+| Doggy Talents Next (`doggytalents`) | 1 | OFFHAND binding; sitting OR docile-mode gate |
+| Iron's Spells summons (`irons_spellbooks`) | 1 | `IMagicSummon.getSummoner()` for owner; timer-bound performance |
+| Ars Nouveau Starbuncle (`ars_nouveau`) | 1 | Plays when idle (ownerless — no friend/foe split based on tamer) |
+| Touhou Little Maid (`touhou_little_maid`) | 1 | Goal-based; reads `IMaidTask.getUid()` for combat veto |
+| MCA Reborn (`mca`) | 1 | Spouse-as-owner classification + plays instruments fully |
+| Pehkui (`pehkui`) | library | Multiplies non-player aura radius by `ScaleTypes.BASE` scale |
+
+Plus 21 curated entity-classification entries shipped for long-tail mods (Alex's Mobs, Friends & Foes, Twilight Forest, Cataclysm, Mowzie's Mobs, …) — see [`docs/npc-compat.md`](docs/npc-compat.md) for the per-mod cheat sheet.
+
+**Modpack authors:** every classification is overridable via `data/effective_instruments/tags/entity_types/` tags or `config/effective_instruments/entity_classification.json`. Eight tags ship: `always_buff`, `always_debuff`, `ignore`, `force_performer`, `never_performer`, `treat_as_villager`, `treat_as_iron_golem`, `player_proxy_owner`.
+
+**Server admins:** `/effectiveinstruments npcs adapters | list [radius] [all] | diagnose <entity>` exposes the full runtime state of every NPC adapter.
+
+**Player path unchanged.** Vanilla worlds with EI + GI + IM see byte-identical aura behavior to 1.5.0 — gated by the new `AuraBehaviorParityTest` regression test.
+
+**Architecture invariant:** the `checkCompatAuditInvariant` gradle task fails the build if any class outside `compat/<modid>/` imports the target mod's runtime types. Each adapter is fully quarantined; reflection-defensive runtime keeps the mod loading cleanly when any NPC mod is absent.
+
 ## Features
 
 - **Dual-polarity auras** — every instrument has a positive (support) aura *and* a negative (offensive) aura. Pick the one you want on each play session via the selector.

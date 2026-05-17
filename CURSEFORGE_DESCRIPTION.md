@@ -2,6 +2,17 @@
 
 **Play music. Empower allies. Or curse your enemies.** Effective Instruments adds a magical aura system to your favorite instrument mod, letting musicians grant potion effects to nearby players and tamed pets while they perform — or, if they pick the negative-polarity variant, inflict debuffs on nearby mobs. Every instrument has its own unique positive *and* offensive aura — pick up a Windsong Lyre and feel the breeze quicken your step (positive) or call down a howling gale that slows and weakens every foe in range (offensive).
 
+**New in 1.6.0 — Multi-mod NPC compatibility!**
+- **Hand an instrument to an NPC and they'll play it.** Nine NPC mods now ship as fully-supported aura performers: Recruits, Guard Villagers, Easy NPC (BOs), Doggy Talents Next, Iron's Spells summons, Ars Nouveau Starbuncle, Touhou Little Maid, MCA Reborn villagers, and Pehkui (library hook). Equip an NPC with an instrument and they swing their mainhand, emit aura-note particles, and apply the instrument's default aura — same mechanic as a player, fully autonomous.
+- **MCA Reborn full integration.** Your married MCA villager is classified as `OWN_PET` of the spouse for positive-aura targeting *and* can play instruments herself.
+- **`/effectiveinstruments npcs` diagnostic tree:** `adapters` lists every loaded NPC adapter and capabilities; `list [radius] [all]` enumerates nearby NPCs (with `[target]` tag for Tier-2/3 target-only entities); `diagnose <entity>` dumps the full performer state for one entity.
+- **Auto-aura selection for NPCs.** NPCs have no UI to pick an aura — they automatically use their held instrument's default mapping. Hand a different instrument, the aura changes.
+- **Mobile-tier NPC support.** Immersive Melodies instruments work on NPCs too — a maid with an IM violin emits mobile-tier auras at every pulse.
+- **Tag- and JSON-driven extensibility.** Modpack authors can override any entity's friend/foe classification via data tags (`effective_instruments:always_buff`, `:always_debuff`, `:ignore`, etc.) or `entity_classification.json` — no Java code needed for long-tail mods. Twenty-one curated defaults ship for Alex's Mobs, Friends & Foes, Twilight Forest, Cataclysm, Mowzie's Mobs, and more.
+- **Pehkui scale-aware aura radius.** Non-player performers' aura radius multiplies by their Pehkui BASE scale — a scaled-up giant maid casts a bigger aura.
+- **Performance bounds.** Per-chunk / per-owner / per-server NPC performer caps prevent armies from melting the TPS.
+- **Player path byte-identical to 1.5.0.** Vanilla worlds with EI + GI + IM see no behavioral difference — gated by the new `AuraBehaviorParityTest`.
+
 **New in 1.5.0:**
 - **Genshin Instruments is now optional!** Effective Instruments works with [Genshin Instruments](https://www.curseforge.com/minecraft/mc-mods/genshin-instruments) (stationary screen-based instruments), [Immersive Melodies](https://www.curseforge.com/minecraft/mc-mods/immersive-melodies) (mobile passive instruments), or both. Pick whichever backend you prefer — the mod adapts.
 - **Standalone Immersive Melodies mode** — install just IM and Effective Instruments, no GI required, and the mobile aura tier works as expected.

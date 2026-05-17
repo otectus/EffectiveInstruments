@@ -1,6 +1,9 @@
 package com.crims.effectiveinstruments.aura;
 
 import com.crims.effectiveinstruments.config.EIServerConfig;
+import com.crims.effectiveinstruments.performer.IAuraPerformer;
+import com.crims.effectiveinstruments.performer.PerformerTier;
+import com.crims.effectiveinstruments.performer.PlayerPerformer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -56,7 +59,34 @@ public final class AuraApplicator {
             TargetingProfile profile,
             Map<Integer, Set<MobEffect>> affectedTargets
     ) {
-        List<LivingEntity> targets = gatherTargets(source, radius, profile);
+        // 1.6.0: delegate to the IAuraPerformer-aware overload. The player path
+        // is preserved byte-for-byte by routing through PlayerPerformer here.
+        // Tier is STATIONARY because callers that want the mobile tier wire
+        // ImmersiveMelodiesAuraHandler directly (which now also wraps).
+        apply(new PlayerPerformer(source, PerformerTier.STATIONARY),
+                aura, radius, durationTicks, profile, affectedTargets);
+    }
+
+    /**
+     * 1.6.0: generic performer-aware aura application. Any {@link IAuraPerformer}
+     * — player or NPC adapter — can drive this entry point. The legacy
+     * {@code apply(ServerPlayer, ...)} overload is preserved as a wrapper.
+     *
+     * <p>For non-player performers the effective radius is scaled by
+     * {@code npcs.performerAuraRadiusMultiplier} and any registered
+     * {@link com.crims.effectiveinstruments.performer.PerformerRadiusModifier}
+     * (e.g., Pehkui scale). The player path is never touched — 1.5.0 parity.
+     */
+    public static void apply(
+            IAuraPerformer performer,
+            AuraPreset aura,
+            int radius,
+            int durationTicks,
+            TargetingProfile profile,
+            Map<Integer, Set<MobEffect>> affectedTargets
+    ) {
+        int effectiveRadius = computeEffectiveRadius(performer, radius);
+        List<LivingEntity> targets = gatherTargets(performer, effectiveRadius, profile);
         boolean offensive = aura.isOffensive();
         for (LivingEntity target : targets) {
             Set<MobEffect> applied = affectedTargets
@@ -129,12 +159,15 @@ public final class AuraApplicator {
      * whatever {@code level.getEntities} returns (effectively distance-ish).
      */
     private static List<LivingEntity> gatherTargets(
-            ServerPlayer source, int radius, TargetingProfile profile
+            IAuraPerformer performer, int radius, TargetingProfile profile
     ) {
         int cap = profile.maxTargetsPerTick();
         if (cap <= 0) return List.of();
 
-        AABB box = source.getBoundingBox().inflate(radius);
+        LivingEntity sourceEntity = performer.entity();
+        if (!(sourceEntity.level() instanceof ServerLevel level)) return List.of();
+
+        AABB box = sourceEntity.getBoundingBox().inflate(radius);
         double radiusSq = (double) radius * radius;
 
         // Bucket by category first so we can emit in priority order.
@@ -146,13 +179,13 @@ public final class AuraApplicator {
         // Source is always a candidate for MUSICIAN; ensure we don't skip it if
         // it sits outside level.getEntities(source, box) (it typically does
         // because the signature excludes the source entity).
-        buckets.get(EntityCategory.MUSICIAN).add(source);
+        buckets.get(EntityCategory.MUSICIAN).add(sourceEntity);
 
-        for (Entity entity : source.serverLevel().getEntities(source, box)) {
+        for (Entity entity : level.getEntities(sourceEntity, box)) {
             if (!(entity instanceof LivingEntity living)) continue;
-            if (source.distanceToSqr(entity) > radiusSq) continue;
+            if (sourceEntity.distanceToSqr(entity) > radiusSq) continue;
 
-            EntityCategory cat = EntityCategory.classify(source, entity, cachedPetAllowlist);
+            EntityCategory cat = EntityCategory.classify(performer, entity, cachedPetAllowlist);
             buckets.get(cat).add(living);
         }
 
@@ -225,6 +258,26 @@ public final class AuraApplicator {
         cachedPetAllowlist = EIServerConfig.PET_ENTITY_ALLOWLIST.get().stream()
                 .map(ResourceLocation::new)
                 .collect(Collectors.toUnmodifiableSet());
+    }
+
+    /**
+     * 1.6.0: non-player performers get their aura radius scaled by the global
+     * {@code npcs.performerAuraRadiusMultiplier} (default 0.75) and any
+     * registered {@link com.crims.effectiveinstruments.performer.PerformerRadiusModifier}
+     * (Pehkui scale, future hooks). Player path is byte-identical to 1.5.0.
+     * Result is clamped to [1, 64] — matching the existing radius parse range.
+     */
+    private static int computeEffectiveRadius(IAuraPerformer performer, int baseRadius) {
+        if (performer.isPlayer()) return baseRadius;
+        double mult;
+        try {
+            mult = EIServerConfig.NPCS_PERFORMER_AURA_RADIUS_MULTIPLIER.get();
+        } catch (IllegalStateException ignored) {
+            mult = 0.75; // SERVER config not loaded — use spec default
+        }
+        mult *= com.crims.effectiveinstruments.performer.PerformerRadiusModifier.Registry.applyAll(performer);
+        int scaled = (int) Math.round(baseRadius * mult);
+        return Math.max(1, Math.min(64, scaled));
     }
 
     private AuraApplicator() {}

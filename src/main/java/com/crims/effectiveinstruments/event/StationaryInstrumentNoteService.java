@@ -5,6 +5,7 @@ import com.crims.effectiveinstruments.aura.AuraPreset;
 import com.crims.effectiveinstruments.compat.immersivemelodies.ImmersiveMelodiesAuraHandler;
 import com.crims.effectiveinstruments.config.EIServerConfig;
 import com.crims.effectiveinstruments.durability.InstrumentDurability;
+import com.crims.effectiveinstruments.performer.IAuraPerformer;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -157,6 +158,56 @@ public final class StationaryInstrumentNoteService {
     public static void onPlayerLogout(UUID playerId) {
         LAST_BROKEN_TICK.remove(playerId);
         LAST_LOW_TICK.remove(playerId);
+    }
+
+    /**
+     * 1.6.0: performer-aware overload consumed by NPC adapter goals
+     * ({@link com.crims.effectiveinstruments.performer.ai.PlayInstrumentGoal}).
+     * For {@link ServerPlayer}-wrapped performers this is byte-identical to
+     * {@link #processPlayedNote(ServerPlayer, ResourceLocation)} — the player
+     * path goes through the same broken-state gate, durability charge, and
+     * aura record.
+     *
+     * <p>For NPC performers the chat-throttled broken/low-durability messages
+     * are skipped (NPCs don't read chat); a future enhancement could surface
+     * those via owner chat instead, but Phase 0 intentionally drops them so
+     * the player path is untouched.
+     *
+     * @param performer     resolved adapter wrapping the playing entity
+     * @param instrument    the instrument stack — caller-provided so adapters
+     *                      can supply a specific slot stack without re-walking
+     * @return true if the source event should be canceled (broken instrument)
+     */
+    public static boolean processNote(IAuraPerformer performer, ItemStack instrument) {
+        if (performer.entity() instanceof ServerPlayer sp) {
+            return processPlayedNote(sp, null);
+        }
+
+        // NPC path: same gates as the player path, minus the chat-targeted messages.
+        if (!instrument.isEmpty() && InstrumentDurability.isBroken(instrument)) {
+            return true;
+        }
+        // 1.6.0 hotfix #4: mirror the player path — onNotePlayed FIRST to record
+        // the note (populates state.recentNoteTicks so isActive() returns true)
+        // and auto-select the instrument-default aura, THEN applyAuraNow.
+        // Without the onNotePlayed call, isActive() returns false on first tick
+        // and applyAuraNow bails before reaching effect application.
+        AuraManager.onNotePlayed(performer);
+        AuraManager.applyAuraNow(performer);
+        if (!instrument.isEmpty() && EIServerConfig.DURABILITY_ENABLED.get()) {
+            int cost = EIServerConfig.DURABILITY_COST_PER_NOTE.get();
+            AuraManager.PlayerAuraState state = AuraManager.getState(performer.entity().getUUID());
+            if (state != null) {
+                AuraPreset aura = state.getSelectedAura();
+                if (aura != null && aura.isOffensive()) {
+                    cost *= EIServerConfig.OFFENSIVE_DURABILITY_COST_MULT.get();
+                }
+            }
+            if (cost > 0) {
+                InstrumentDurability.damage(instrument, cost, performer.entity() instanceof ServerPlayer ? (ServerPlayer) performer.entity() : null);
+            }
+        }
+        return false;
     }
 
     private StationaryInstrumentNoteService() {}

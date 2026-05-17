@@ -81,6 +81,13 @@ dependencies {
     // compileOnly so the mod loads even when EMI is absent at runtime.
     compileOnly fg.deobf("curse.maven:even-more-instruments-${evenmoreinstruments_project_id}:${evenmoreinstruments_file_id}")
 
+    // 1.6.0 Phase 2 — Recruits NPC compat: pure-reflection.
+    // Recruits is not on Curse Maven (no compileOnly artifact available);
+    // the compat/recruits/* adapter uses Class.forName + cached MethodHandles
+    // for every Recruits API call. Matches spec §1 axiom for closed-source
+    // / unavailable mods. mods.toml soft-dep + ModList.isLoaded gate at
+    // runtime suffice.
+
     // Testing
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -130,3 +137,67 @@ jar {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
+
+// 1.6.0: audit invariant — every per-mod compat package may import only its
+// own mod's classes. A grep audit guards against cross-namespace creep so
+// shipping a new adapter can't accidentally leak `import com.cstav.…` into
+// `aura/AuraManager.java`. Wired into the `check` lifecycle so CI fails
+// the build on violation.
+//
+// The "modid → import prefix" map below grows alongside compat/<modid>/
+// packages — add a row when adding an adapter in Phases 2–5.
+tasks.register('checkCompatAuditInvariant') {
+    group = 'verification'
+    description = 'Asserts compat/<modid>/* packages own all imports of their target mod\'s classes.'
+    doLast {
+        def srcDir = file("$projectDir/src/main/java/com/crims/effectiveinstruments")
+        if (!srcDir.exists()) return
+        def rules = [
+            // import prefix : allowed source-path substring
+            'com.cstav.genshinstrument'   : '/compat/genshin/',
+            'com.talhanation.recruits'    : '/compat/recruits/',
+            'tallestegg.guardvillagers'   : '/compat/guardvillagers/',
+            'de.markusbordihn.easynpc'    : '/compat/easy_npc/',
+            'com.github.tartaricacid.touhoulittlemaid' : '/compat/touhou_little_maid/',
+            'doggytalents'                : '/compat/doggytalents/',
+            'io.redspace.ironsspellbooks' : '/compat/irons_spellbooks/',
+            'com.hollingsworth.arsnouveau': '/compat/ars_nouveau/',
+            'mca'                         : '/compat/mca/',
+            'noppes.npcs'                 : '/compat/customnpcs/',
+            'elucent.eidolon'             : '/compat/eidolon/',
+            'com.finallion.graveyard'     : '/compat/graveyard/',
+            'com.bobmowzie.mowziesmobs'   : '/compat/mowziesmobs/',
+            'com.github.alexthe666.alexsmobs' : '/compat/alexsmobs/',
+            'com.github.L_Ender.cataclysm': '/compat/cataclysm/',
+            'twilightforest'              : '/compat/twilightforest/',
+            'com.infamous.dungeons_mobs'  : '/compat/dungeons_mobs/',
+            'net.mcreator.borninchaos_v1' : '/compat/born_in_chaos_v1/',
+            'com.faux.morevillagers'      : '/compat/morevillagers/',
+            'com.elenai.feathers'         : '/compat/domesticationinnovation/',
+            'virtuoel.pehkui'             : '/compat/pehkui/',
+        ]
+        def violations = []
+        srcDir.eachFileRecurse(groovy.io.FileType.FILES) { f ->
+            if (!f.name.endsWith('.java')) return
+            def relPath = f.absolutePath.replace('\\', '/')
+            f.eachLine { line ->
+                if (!line.startsWith('import ')) return
+                def importStmt = line.substring(7).replaceAll(';.*$', '').trim()
+                rules.each { prefix, allowed ->
+                    if (importStmt.startsWith(prefix) && !relPath.contains(allowed)) {
+                        violations << "${relPath}: import ${importStmt} (allowed only under ${allowed})"
+                    }
+                }
+            }
+        }
+        if (!violations.isEmpty()) {
+            throw new GradleException(
+                'EI compat audit invariant violated:\n  ' + violations.join('\n  ') + '\n' +
+                'Per-mod adapter packages must own every import of their target mod\'s classes.'
+            )
+        }
+        logger.lifecycle('EI compat audit passed (no cross-namespace imports detected).')
+    }
+}
+
+check.dependsOn 'checkCompatAuditInvariant'

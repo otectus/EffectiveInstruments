@@ -4,6 +4,257 @@ All notable changes to Effective Instruments will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] - 2026-05-16
+
+### Added — Multi-mod NPC compatibility
+
+This release generalizes Effective Instruments from a *player-only* aura
+framework to a *generic LivingEntity* aura framework, then layers per-mod
+NPC adapters on top. Any supported mod's NPC can drive the aura pipeline.
+
+#### Core abstraction layer (`performer/`)
+- **`IAuraPerformer`** — central interface. Wraps any `LivingEntity` (player or
+  NPC adapter) and exposes owner/team/faction/instrument/aura-id/tier in one
+  contract. The player path stays byte-identical to 1.5.0 — gated by the new
+  `AuraBehaviorParityTest` regression test.
+- **`PlayerPerformer`** — the backwards-compat anchor. All internal callers
+  wrap their `ServerPlayer` at the boundary; the deprecated `apply(ServerPlayer, …)`
+  overload is preserved for one release.
+- **`PerformerRegistry`** — ServiceLoader hub. Discovers per-mod
+  `PerformerAdapterProvider`s through
+  `META-INF/services/com.crims.effectiveinstruments.performer.PerformerRegistry$PerformerAdapterProvider`.
+- **`TargetClassifier`** — performer-aware version of `EntityCategory.classify`.
+  Resolution order: adapter hint → tag → JSON override → owner/team/faction → vanilla.
+- **`OwnerResolver`** + **`FactionResolver`** — cross-mod oracles. Vanilla
+  `OwnableEntity` path is the short-circuit; per-mod providers register on top.
+  `ReflectiveOwnerProbe` is the fallback for unknown entities.
+- **`PerformerRadiusModifier`** — non-player aura radius is scaled by
+  `npcs.performerAuraRadiusMultiplier` (default 0.75) and any registered
+  modifier (e.g., Pehkui scale).
+- **`ai/PlayInstrumentGoal`** — reusable state machine for goal-based
+  adapters: `INACTIVE → READY → PLAYING_SUPPORT|OFFENSIVE → INTERRUPTED → COOLDOWN`.
+
+#### Tag + JSON extensibility (modpack authors)
+- 8 new entity-type tags under `data/effective_instruments/tags/entity_types/`:
+  `always_buff`, `always_debuff`, `ignore`, `force_performer`, `never_performer`,
+  `treat_as_villager`, `treat_as_iron_golem`, `player_proxy_owner`.
+- `config/effective_instruments/entity_classification.json` — JSON overrides per
+  entity type with `category` / `requireTamed` / `delegateTo`. Ships with 22
+  curated defaults across 9 long-tail mods (Alex's Mobs, Friends & Foes,
+  Twilight Forest, Cataclysm, Mowzie's Mobs, More Villagers, Dungeons Mobs,
+  Born in Chaos, Eidolon, Graveyard). Tag overrides win over JSON; JSON wins
+  over adapter defaults.
+
+#### Tier-1 adapters (full performers)
+- **`compat/recruits`** — talhanation/recruits 1.15.0+. Reflection-cached
+  `getOwnerUUID` / `getInventory` / `getFleeing` / `getShouldRest` /
+  `getAggroState`. Priority 3, `MOVE+LOOK` mutex.
+- **`compat/guardvillagers`** — seymourimadeit/guardvillagers 1.6.15+.
+  `getOwnerId()` direct, Hero-of-the-Village player as implicit owner
+  fallback. Priority 5.
+- **`compat/easy_npc`** — MarkusBordihn/BOs-Easy-NPC 5.0+. Marker-interface
+  recognition (`EasyNPC<E extends Mob>`); owner via `OwnableEntity` (vanilla
+  path). Priority 4.
+- **`compat/doggytalents`** — DashieDev/DoggyTalentsNext 1.18.64+. OFFHAND
+  instrument slot, sitting-or-docile gate via reflection on `isInSittingPose`
+  and `getMode().name()`. Priority 6.
+- **`compat/irons_spellbooks`** — iron431/irons-spells-n-spellbooks 3.4+.
+  `MagicSummon.getSummoner()` for owner; summon-timer effect (effect id
+  `irons_spellbooks:summon_timer`) drives a 60-tick safety margin so summons
+  don't perform mid-despawn. Priority 8.
+- **`compat/ars_nouveau`** — baileyholl/Ars-Nouveau 4.0+. Starbuncle is
+  **ownerless** (verified: no `OWNER_UUID` data field in the source). Plays
+  for nearby targets via the global classifier. Priority 4.
+- **`compat/touhou_little_maid`** — TartaricAcid/TouhouLittleMaid 1.5.0+.
+  Goal-based (`EntityMaid extends TamableAnimal` so it has a goalSelector
+  alongside its Brain). Combat veto reads `IMaidTask.getUid()` and matches
+  against `attack`/`combat`/`guard`. Priority 7.
+
+#### Tier-2 adapter (target-only)
+- **`compat/mca`** — Luke100000/minecraft-comes-alive (MCA Reborn) 7.0+.
+  `EntityRelationship.of(villager).getPartnerUUID()` is treated as the
+  villager's owner — a player's married villager classifies as `OWN_PET` of
+  their spouse. Tier-1 promotion deferred to 1.7.0 (Brain drift risk).
+
+#### Library hooks
+- **`compat/pehkui`** — Virtuoel/Pehkui 3.0+. Multiplies non-player aura
+  radius by the entity's `ScaleTypes.BASE.getScaleData(entity).getScale()`.
+  Player path untouched.
+
+#### Diagnostic commands (`/effectiveinstruments npcs`)
+- `npcs adapters` — list every discovered `PerformerAdapterProvider` and
+  whether it's active (mod loaded) or dormant.
+- `npcs list [radius]` — scan up to 128 blocks for wrappable NPCs; columns
+  `entityType uuid owner instrument`.
+- `npcs diagnose <entity>` — dump one NPC's `IAuraPerformer` view: tier,
+  uuid, owner, team, instrument, selected aura id, `canPerformNow`.
+
+#### Build / audit
+- **`checkCompatAuditInvariant`** gradle task — fails the build on any
+  cross-namespace import (e.g., `import com.cstav.genshinstrument` outside
+  `compat/genshin/`). Wired into `check` lifecycle; CI gates on it.
+- **`AuraBehaviorParityTest`** — structural-invariants regression test for
+  the `EntityCategory` enum order and presence of the new `TargetClassifier`
+  / `PlayerPerformer` / `IAuraPerformer` types. The byte-identical in-game
+  behavior parity test lives in GameTest fixtures (deferred to 1.6.1).
+
+### Changed
+- **`EntityCategory.classify`** has a new `IAuraPerformer`-aware overload.
+  The legacy `classify(ServerPlayer, Entity, Set)` is preserved as a
+  deprecated wrapper for one release.
+- **`AuraApplicator.apply`** has a new `IAuraPerformer`-aware overload.
+  Non-player paths now route through `computeEffectiveRadius` for
+  multiplier scaling. Player path is unchanged.
+- **`AuraManager.spawnAuraNotes`** now accepts any `LivingEntity` — particle
+  origin shifts up to `y + bbHeight * 0.7` for non-players (head height),
+  while players keep the `y + 0.5` offset for visual parity.
+- **`StationaryInstrumentNoteService`** has a new `processNote(IAuraPerformer, ItemStack)`
+  overload consumed by NPC adapter goals.
+- **`ImmersiveMelodiesAuraHandler`** has a parallel `ACTIVE_MOBILE_NPCS`
+  set and `tickPerformer(IAuraPerformer)` method. NPC mobile activation
+  flows entirely through the adapter — IM's `playing=true` NBT flag is
+  never written for NPCs.
+- **`EffectiveInstrumentsMod.commonSetup`** calls
+  `PerformerRegistry.discover()` + `bootstrapAll()` after the existing
+  backend init.
+
+### Config schema (additions only; 1.5.0 keys unchanged)
+- `[npcs]` master block (13 keys: enabled, allowPerformers, allowTargets,
+  performerCooldownTicks, performerAuraRadiusMultiplier, requireOwnerOnline,
+  etc.).
+- `[npcs.recruits]` (4 keys), `[npcs.guardvillagers]` (3 keys),
+  `[npcs.easy_npc]` (2), `[npcs.doggytalents]` (3),
+  `[npcs.irons_spellbooks]` (3), `[npcs.ars_nouveau]` (3),
+  `[npcs.touhou_little_maid]` (3), `[npcs.mca]` (2), `[npcs.pehkui]` (1).
+
+### Verification
+- **Pure-reflection runtime path** for every adapter. Every per-mod API
+  call goes through cached `MethodHandle`s with graceful degradation —
+  mod-version drift downgrades the adapter to "no veto" / "no owner",
+  never a crash.
+- **GitHub-source verification** at design time for every adapter caught
+  signature mismatches before shipping: Recruits (`isFleeing` → `getFleeing`,
+  `isInRaid` → `getAggroState == AGGRO_RAID`), Guard Villagers (`isAggressive`
+  is on `Mob` not `LivingEntity`), Iron's Spells (`IMagicSummon` →
+  `MagicSummon`, `getSummoner` returns `LivingEntity` not UUID), Ars
+  Nouveau Starbuncle (no owner tracking at all).
+- **Audit invariant passes** with 10 active compat packages.
+
+### Hotfix bundle — runtime fixes from in-game test cycles (folded into v1.6.0)
+
+These fixes landed during in-game test cycles before the public v1.6.0 release;
+they are part of v1.6.0 proper, not a separate version. They are documented
+together here so the runtime-critical fixes are not lost when the initial Phase
+0-6 section is read alone.
+
+- **`mods.toml` versionRange widening.** Every Phase 2-5 optional NPC dep was
+  pinned to a numeric lower bound (e.g. `[3.4,)` for `irons_spellbooks`).
+  Forge's Maven comparator misorders versions of the form `1.20.1-3.15.6`
+  because it parses the leading `1.20.1` as major version 1 < 3. All nine
+  optional deps now widened to `[0,)`; real version validation happens at
+  runtime via `ModList.isLoaded` + reflection probes. The existing 1.5.0
+  entry for `immersive_melodies` already used the same pattern.
+
+- **Reflection signature corrections** (verified against installed-jar
+  bytecode via `javap`):
+  - **Guard Villagers** — class FQN `tallestegg.guardvillagers.common.entities.Guard`
+    → `tallestegg.guardvillagers.entities.Guard` (no `common.` segment).
+  - **MCA Reborn** — Architectury universal jars preserve the `forge.`
+    prefix at runtime. Class FQN is `forge.net.mca.entity.VillagerEntityMCA`.
+    `MCAReflection.tryResolve` probes both prefixed + bare candidates for
+    forward-compat.
+  - **Iron's Spells** — `MagicSummon` is a 337-byte deprecated stub; the
+    real interface is `IMagicSummon` (6535 bytes). `getSummoner()` returns
+    `Entity`, not `LivingEntity`.
+  - **Recruits** — `getAggroState` doesn't exist; the state getter is
+    `getState()`. The AGGRO_RAID veto was dropped since the existing
+    target/last-hurt/fleeing/should-rest checks cover combat states.
+  - **Doggy Talents Next** — `isInSittingPose` reflection on inherited
+    vanilla methods misfires under Forge's class transformer. Switched
+    to direct `TamableAnimal.isInSittingPose()` bytecode call (no reflection).
+
+- **Reflection helper pattern swap** — every adapter's reflection helper
+  switched from `MethodHandles.publicLookup() + unreflect() + asType()` to
+  plain `java.lang.reflect.Method.invoke()` with `setAccessible(true)`. The
+  publicLookup pipeline silently fails to resolve inherited / vanilla
+  methods across Forge's class transformer; plain reflection works
+  unconditionally.
+
+- **NPC aura auto-selection** — three cascading nulls blocked NPC performance:
+  `AuraManager.PlayerAuraState` was never created for NPCs (no UI to call
+  `setAuraSelection`); `state.selectedAura` was null; `state.isActive`
+  returned false because `recentNoteTicks` was empty (no UI to call
+  `onNotePlayed`). Fixes:
+  - New `AuraManager.onNotePlayed(IAuraPerformer)` overload with NPC
+    auto-select from `InstrumentAuraMapping.getDefaultAuraId(itemId)` —
+    same mapping the player's instrument-screen-open path uses.
+  - `StationaryInstrumentNoteService.processNote(IAuraPerformer, ItemStack)`
+    NPC path now calls `onNotePlayed(performer)` before `applyAuraNow(performer)`
+    — mirrors the player path.
+  - `PlayInstrumentGoal.currentPreset()` falls back to instrument-default
+    when `selectedAuraId()` is empty, so the goal enters PLAYING_* on the
+    first tick instead of thrashing INACTIVE→READY→INACTIVE.
+  - `applyAuraNow(IAuraPerformer)` uses `getOrCreate` for NPC UUIDs; player
+    path stays byte-identical with `get`.
+
+- **Mobile-tier NPC tick registration** — Tier-1 adapters wrapped NPCs for
+  `MOBILE` tier but never called `ImmersiveMelodiesAuraHandler.registerActiveMobileNpc(uuid)`,
+  so the IM tick loop never iterated them and mobile auras were dormant.
+  `PlayInstrumentGoal.start()` now auto-registers the NPC when the held
+  instrument has a `MobileInstrumentAuraMapping`; `stop()` unregisters.
+  One change fixes mobile-tier auras for every Tier-1 NPC adapter (Recruits,
+  Guard Villagers, Easy NPC, DTN, Iron's Spells, AN Starbuncle, Touhou Maid,
+  MCA).
+
+- **MCA Tier-1 promotion** — `MCAPerformerAdapter` was Tier-2 target-only per
+  the original 1.6.0 spec (§6.8 deferred to 1.7.0). Per user request,
+  promoted to full Tier-1:
+  - New `MCAPerformer`, `MCAInstrumentGoal`, `MCAEventHandler`.
+  - `MCAReflection.isInCombatState` uses vanilla `AbstractVillager.isSleeping`
+    + `Villager.isTrading` checks (no MCA-specific bandit-trait reflection
+    in this pass — deferred to 1.6.1).
+  - `MCAPerformerAdapter.capabilities()` now includes `STATIONARY_PLAY` +
+    `MOBILE_PLAY` alongside the existing `AURA_TARGET` + `OWNER_AWARE`.
+  - VillagerEntityMCA's class hierarchy extends vanilla `Villager` (verified
+    via `javap`), and `Mob.serverAiStep` ticks the goalSelector
+    unconditionally — same goal-injection pattern as Touhou Maid (whose
+    Brain-based AI also ticks goalSelector via the same path).
+
+- **`/effectiveinstruments npcs` UX enhancements**:
+  - `npcs list <radius> all` includes Tier-2/3 target-only entities with a
+    `[target]` tag — addresses the common confusion where users hand an
+    instrument to a target-only entity expecting it to play.
+  - `npcs diagnose <entity>` now shows resolved owner + JSON override +
+    target-side classification bucket when the entity isn't wrappable as
+    a performer. Confirms spouse-as-owner classification before/after
+    MCA Tier-1 promotion.
+
+- **JSON entity-classification defaults** — dropped four invalid
+  `morevillagers:*` entries from the shipped `entity_classification.json`.
+  MoreVillagers adds *professions* to `minecraft:villager`, not new entity
+  types, so the `morevillagers:florist` etc. IDs never matched any
+  registered entity type at load. The 21 remaining curated entries cover
+  actually-mapped Tier-3 entities. Log message switched from hardcoded
+  `22 curated entries` to a dynamic `root.entrySet().size() - 1` count.
+
+- **`AuraManager.spawnAuraNotes` particle origin** — for non-player
+  performers, the plume anchors at `entity.position().y + bbHeight * 0.7`
+  (head height) instead of the player-only `y + 0.5` offset. Player path
+  preserves the exact 1.5.0 offset for parity.
+
+### Deferred to 1.6.1 / 1.7.0
+- Tier-2 closed-source adapters (Custom NPCs, Eidolon thralls, Graveyard
+  Ghouling) — pure-reflection adapters need test-fixture verification
+  before shipping; their entity-classification JSON entries ship today.
+- Brain-based adapter path (`PlayInstrumentBehavior` + `EIMemories`) —
+  scaffold ships in Phase 0; first concrete user is a future Brain-only
+  NPC adapter where goal injection is not viable.
+- MCA bandit-trait combat veto — would require reflection on MCA's
+  `Traits` system. Deferred since the baseline Tier-1 promotion is the
+  immediate user need.
+- `force-play` / `grant` `/effectiveinstruments npcs` subcommands.
+- 16-scenario GameTest matrix (spec §14).
+
 ## [1.5.0] - 2026-05-09
 
 ### Changed

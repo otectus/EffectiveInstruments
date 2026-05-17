@@ -5,10 +5,14 @@ import com.crims.effectiveinstruments.config.EIServerConfig;
 import com.crims.effectiveinstruments.network.EIPacketHandler;
 import com.crims.effectiveinstruments.network.packet.SyncAuraSelectionS2CPacket;
 import com.crims.effectiveinstruments.particle.AuraNoteParticleOptions;
+import com.crims.effectiveinstruments.performer.IAuraPerformer;
+import com.crims.effectiveinstruments.performer.PerformerTier;
+import com.crims.effectiveinstruments.performer.PlayerPerformer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffect;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 
 import javax.annotation.Nullable;
@@ -109,13 +113,51 @@ public class AuraManager {
     }
 
     public static void onNotePlayed(ServerPlayer player) {
-        PlayerAuraState state = getOrCreate(player.getUUID());
-        state.recordNote(player.level().getGameTime());
-        // 1.4.7: ensure the player's in the tick-loop even if we missed the
-        // backend's instrument-open event for some reason (old worlds, modded
-        // compat hiccups). onNotePlayed is a strong signal they're actually
-        // playing, which is the whole point of activeMusicians.
-        activeMusicians.add(player.getUUID());
+        onNotePlayed((IAuraPerformer) new PlayerPerformer(player, PerformerTier.STATIONARY));
+    }
+
+    /**
+     * 1.6.0 hotfix #4: performer-aware overload. Used by NPC adapter goals
+     * (Recruits, Touhou Maid, Iron's Spells summons, …) to record a played
+     * note. State is keyed by {@code performer.entity().getUUID()} — players
+     * and NPCs share the same map.
+     *
+     * <p>For NPCs without an explicit aura selection (no UI to set one), this
+     * auto-selects the held instrument's default aura via
+     * {@link InstrumentAuraMapping#getDefaultAuraId(ResourceLocation)} — the
+     * same mapping the player path uses on instrument-screen-open. Without
+     * this, NPCs would never enter PLAYING state because
+     * {@code state.selectedAura} would remain null.
+     */
+    public static void onNotePlayed(IAuraPerformer performer) {
+        LivingEntity entity = performer.entity();
+        PlayerAuraState state = getOrCreate(entity.getUUID());
+        state.recordNote(entity.level().getGameTime());
+        activeMusicians.add(entity.getUUID());
+
+        // NPC auto-select: only when no aura is set. Players use the UI; NPCs
+        // have none, so we mirror onInstrumentIdReceived's lookup here.
+        if (state.selectedAura == null && !performer.isPlayer()) {
+            autoSelectFromInstrument(state, performer);
+        }
+    }
+
+    /**
+     * Look up the default aura for the performer's held instrument and pin it
+     * to {@code state.selectedAura}. Used by the NPC paths; no-op when no
+     * mapping exists for the held instrument.
+     */
+    private static void autoSelectFromInstrument(PlayerAuraState state, IAuraPerformer performer) {
+        net.minecraft.world.item.ItemStack stack = performer.instrumentStack();
+        if (stack.isEmpty()) return;
+        ResourceLocation itemId = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+        if (itemId == null) return;
+        String defaultId = InstrumentAuraMapping.getDefaultAuraId(itemId);
+        if (defaultId == null) return;
+        AuraRegistry.getById(defaultId).ifPresent(preset -> {
+            state.selectedAura = preset;
+            state.currentInstrumentId = itemId;
+        });
     }
 
     /**
@@ -127,15 +169,36 @@ public class AuraManager {
      * on the tick-scheduled path to avoid per-note particle spam.
      */
     public static void applyAuraNow(ServerPlayer player) {
-        PlayerAuraState state = PLAYER_STATES.get(player.getUUID());
+        applyAuraNow((IAuraPerformer) new PlayerPerformer(player, PerformerTier.STATIONARY));
+    }
+
+    /**
+     * 1.6.0: performer-aware overload. Used by NPC adapter goals (Recruits,
+     * Touhou Maid, etc.) to apply the selected aura on every note. State is
+     * keyed by {@code performer.entity().getUUID()} so a single map handles
+     * both player and NPC entries — no separate NPC map.
+     */
+    public static void applyAuraNow(IAuraPerformer performer) {
+        LivingEntity entity = performer.entity();
+        // Player path stays byte-identical to 1.5.0: use get(), not getOrCreate,
+        // so state is null until the player explicitly opens an instrument or
+        // selects an aura. NPCs use getOrCreate so the state exists by the time
+        // applyAuraNow runs even if onNotePlayed wasn't called first (defense
+        // in depth against goal-order races).
+        PlayerAuraState state = performer.isPlayer()
+                ? PLAYER_STATES.get(entity.getUUID())
+                : getOrCreate(entity.getUUID());
         if (state == null) return;
+        if (state.selectedAura == null && !performer.isPlayer()) {
+            autoSelectFromInstrument(state, performer);
+        }
         AuraPreset aura = state.selectedAura;
         if (aura == null) return;
-        long gameTime = player.level().getGameTime();
+        long gameTime = entity.level().getGameTime();
         if (!state.isActive(gameTime)) return;
         Optional<AuraPreset> current = AuraRegistry.getById(aura.id());
         if (current.isEmpty() || !current.get().enabled()) return;
-        applyAuraEffects(player, aura);
+        applyAuraEffects(performer, aura);
     }
 
     /**
@@ -271,13 +334,21 @@ public class AuraManager {
     }
 
     private static void applyAuraEffects(ServerPlayer source, AuraPreset aura) {
+        applyAuraEffects((IAuraPerformer) new PlayerPerformer(source, PerformerTier.STATIONARY), aura);
+    }
+
+    /**
+     * 1.6.0: performer-aware overload. Builds the same TargetingProfile +
+     * radius/duration + calls AuraApplicator with the IAuraPerformer overload.
+     */
+    private static void applyAuraEffects(IAuraPerformer source, AuraPreset aura) {
         if (aura.isOffensive() && !EIServerConfig.OFFENSIVE_AURAS_ENABLED.get()) {
             // Master kill switch — treat as if the preset doesn't exist at the apply stage.
             return;
         }
         int radius = aura.getEffectiveRadius();
         int duration = aura.getEffectiveDuration();
-        PlayerAuraState state = getOrCreate(source.getUUID());
+        PlayerAuraState state = getOrCreate(source.entity().getUUID());
         TargetingProfile profile = aura.isOffensive()
                 ? TargetingProfiles.offensive()
                 : TargetingProfiles.positive();
@@ -317,7 +388,18 @@ public class AuraManager {
      * {@link AuraPreset#getEffectiveRadius()}.
      */
     public static void spawnAuraNotes(ServerPlayer source, AuraPreset aura, int radius) {
-        ServerLevel level = source.serverLevel();
+        spawnAuraNotes((LivingEntity) source, aura, radius);
+    }
+
+    /**
+     * 1.6.0: entity-generic overload. NPC adapters call this so their
+     * performers emit the same aura-note plume as players. Particle origin
+     * shifts up to {@code y + bbHeight * 0.7} (about head height for vanilla-
+     * sized mobs) per spec §11, but for players this keeps the {@code y + 0.5}
+     * offset for byte-identical visual parity.
+     */
+    public static void spawnAuraNotes(LivingEntity source, AuraPreset aura, int radius) {
+        if (!(source.level() instanceof ServerLevel level)) return;
         int color = aura.color();
         float r = ((color >> 16) & 0xFF) / 255f;
         float g = ((color >> 8) & 0xFF) / 255f;
@@ -326,13 +408,18 @@ public class AuraManager {
         AuraNoteParticleOptions options = new AuraNoteParticleOptions(r, g, b);
         int count = Math.min(3 + radius / 4, 12);
 
+        // Match the legacy player offset of +0.5 above feet for ServerPlayer;
+        // for NPCs use head-height (bbHeight * 0.7) so the plume reads from
+        // their position regardless of mob size.
+        double yBase = source instanceof ServerPlayer ? 0.5 : source.getBbHeight() * 0.7;
+
         for (int i = 0; i < count; i++) {
             double angle = level.random.nextDouble() * Math.PI * 2;
             double dist = radius <= 1
                     ? level.random.nextDouble() * Math.max(radius, 0.5)
                     : 1.0 + level.random.nextDouble() * (radius - 1);
             double px = source.getX() + Math.cos(angle) * dist;
-            double py = source.getY() + 0.5 + level.random.nextDouble() * 2.0;
+            double py = source.getY() + yBase + level.random.nextDouble() * 2.0;
             double pz = source.getZ() + Math.sin(angle) * dist;
 
             level.sendParticles(options, px, py, pz, 1, 0, 0.02, 0, 0);

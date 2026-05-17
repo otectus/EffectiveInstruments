@@ -10,6 +10,9 @@ import com.crims.effectiveinstruments.compat.immersivemelodies.ImmersiveMelodies
 import com.crims.effectiveinstruments.compat.immersivemelodies.ImmersiveMelodiesCompat;
 import com.crims.effectiveinstruments.config.EIServerConfig;
 import com.crims.effectiveinstruments.durability.InstrumentDurability;
+import com.crims.effectiveinstruments.performer.IAuraPerformer;
+import com.crims.effectiveinstruments.performer.PerformerRegistry;
+import com.crims.effectiveinstruments.performer.PerformerTier;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import net.minecraft.ChatFormatting;
@@ -17,9 +20,16 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.AABB;
+
+import java.util.List;
+import java.util.Optional;
 
 public final class EICommands {
 
@@ -96,7 +106,206 @@ public final class EICommands {
                                 .requires(source -> source.hasPermission(2))
                                 .executes(ctx -> runResetMappings(ctx.getSource()))
                         )
+                        .then(Commands.literal("npcs")
+                                .requires(source -> source.hasPermission(0))
+                                .then(Commands.literal("adapters")
+                                        .executes(ctx -> runNpcsAdapters(ctx.getSource())))
+                                .then(Commands.literal("list")
+                                        .executes(ctx -> runNpcsList(ctx.getSource(), 16, false))
+                                        .then(Commands.argument("radius", IntegerArgumentType.integer(1, 128))
+                                                .executes(ctx -> runNpcsList(
+                                                        ctx.getSource(),
+                                                        IntegerArgumentType.getInteger(ctx, "radius"), false))
+                                                .then(Commands.literal("all")
+                                                        .executes(ctx -> runNpcsList(
+                                                                ctx.getSource(),
+                                                                IntegerArgumentType.getInteger(ctx, "radius"), true)))))
+                                .then(Commands.literal("diagnose")
+                                        .then(Commands.argument("entity", EntityArgument.entity())
+                                                .executes(ctx -> runNpcsDiagnose(
+                                                        ctx.getSource(),
+                                                        EntityArgument.getEntity(ctx, "entity")))))
+                        )
         );
+    }
+
+    /**
+     * 1.6.0: list every {@link PerformerRegistry.PerformerAdapterProvider}
+     * discovered through ServiceLoader, marking each as ACTIVE (mod present)
+     * or DORMANT (mod absent). Read-only; no permission gate.
+     */
+    private static int runNpcsAdapters(CommandSourceStack source) {
+        List<PerformerRegistry.PerformerAdapterProvider> active = PerformerRegistry.activeProviders();
+        source.sendSuccess(() -> Component.literal("=== EI NPC Adapters ===").withStyle(ChatFormatting.GOLD), false);
+        if (active.isEmpty()) {
+            source.sendSuccess(() -> Component.literal(
+                    "No NPC adapters active. Install one of: recruits, guardvillagers, easy_npc, "
+                            + "doggytalents, irons_spellbooks, ars_nouveau, touhou_little_maid, mca, pehkui."
+            ).withStyle(ChatFormatting.YELLOW), false);
+            return 1;
+        }
+        for (PerformerRegistry.PerformerAdapterProvider p : active) {
+            source.sendSuccess(() -> Component.literal(
+                    p.modId() + " — " + p.capabilities()
+            ).withStyle(ChatFormatting.GRAY), false);
+        }
+        source.sendSuccess(() -> Component.literal(
+                "Total: " + active.size() + " active adapter(s)."
+        ).withStyle(ChatFormatting.GREEN), false);
+        return 1;
+    }
+
+    /**
+     * 1.6.0: scan a radius around the sender for {@link LivingEntity}s that
+     * {@link PerformerRegistry#wrap} can wrap as a stationary performer.
+     * Returns short rows: entityType, uuid, owner, instrument.
+     *
+     * <p>When {@code includeTargets} is true (via the {@code all} subcommand),
+     * also list Tier-2/3 target-only entities (e.g., MCA villagers) with a
+     * {@code [target]} tag. This addresses the common confusion where users
+     * hand an instrument to an MCA villager expecting her to play — MCA is
+     * target-only by spec §6.8.
+     */
+    private static int runNpcsList(CommandSourceStack source, int radius, boolean includeTargets) {
+        if (!(source.getEntity() instanceof LivingEntity center)) {
+            source.sendFailure(Component.literal("Run as a player or living entity."));
+            return 0;
+        }
+        if (!(center.level() instanceof ServerLevel level)) return 0;
+
+        AABB box = center.getBoundingBox().inflate(radius);
+        int performers = 0;
+        int targets = 0;
+        source.sendSuccess(() -> Component.literal(
+                "=== EI NPCs within " + radius + " blocks"
+                        + (includeTargets ? " (incl. targets)" : "") + " ==="
+        ).withStyle(ChatFormatting.GOLD), false);
+        for (Entity e : level.getEntities(center, box)) {
+            if (!(e instanceof LivingEntity living)) continue;
+            Optional<IAuraPerformer> wrapped =
+                    PerformerRegistry.wrap(living, PerformerTier.STATIONARY);
+            if (wrapped.isPresent()) {
+                performers++;
+                IAuraPerformer perf = wrapped.get();
+                String owner = perf.ownerUuid().map(java.util.UUID::toString).orElse("(none)");
+                String instr = perf.instrumentStack().isEmpty()
+                        ? "(empty)" : perf.instrumentStack().getItem().toString();
+                source.sendSuccess(() -> Component.literal(
+                        String.format("  %s uuid=%s owner=%s instr=%s",
+                                living.getType().toShortString(),
+                                living.getUUID().toString().substring(0, 8),
+                                owner.length() > 8 ? owner.substring(0, 8) : owner,
+                                instr)
+                ).withStyle(ChatFormatting.GRAY), false);
+                continue;
+            }
+            // Target-only entity (Tier-2/3): include if requested. Detection is
+            // the OwnerResolver having a registered provider for this entity,
+            // OR the entity_classification.json having an override entry.
+            if (!includeTargets) continue;
+            boolean isKnownTarget =
+                    com.crims.effectiveinstruments.performer.OwnerResolver.ownerOf(living).isPresent()
+                    || com.crims.effectiveinstruments.data.EntityClassificationLoader
+                            .lookup(living.getType()).hasCategory();
+            if (!isKnownTarget) continue;
+            targets++;
+            source.sendSuccess(() -> Component.literal(
+                    String.format("  %s uuid=%s [target]",
+                            living.getType().toShortString(),
+                            living.getUUID().toString().substring(0, 8))
+            ).withStyle(ChatFormatting.DARK_GRAY), false);
+        }
+        int totalPerformers = performers;
+        int totalTargets = targets;
+        source.sendSuccess(() -> Component.literal(
+                includeTargets
+                    ? String.format("Total: %d performer(s), %d target(s).", totalPerformers, totalTargets)
+                    : "Total: " + totalPerformers + " wrappable NPC(s)."
+        ).withStyle(ChatFormatting.GREEN), false);
+        return 1;
+    }
+
+    /**
+     * 1.6.0: dump the {@link IAuraPerformer} view of one entity for "why isn't
+     * my NPC performing?" debugging. Mirrors the player {@code diagnose}
+     * subcommand columns.
+     */
+    private static int runNpcsDiagnose(CommandSourceStack source, Entity entity) {
+        if (!(entity instanceof LivingEntity living)) {
+            source.sendFailure(Component.literal("Entity must be a LivingEntity."));
+            return 0;
+        }
+        if (!(living.level() instanceof ServerLevel level)) return 0;
+
+        source.sendSuccess(() -> Component.literal(
+                "=== EI NPC Diagnose: " + living.getType().toShortString() + " ==="
+        ).withStyle(ChatFormatting.GOLD), false);
+
+        Optional<IAuraPerformer> wrappedStat =
+                PerformerRegistry.wrap(living, PerformerTier.STATIONARY);
+        Optional<IAuraPerformer> wrappedMob =
+                PerformerRegistry.wrap(living, PerformerTier.MOBILE);
+
+        if (wrappedStat.isEmpty() && wrappedMob.isEmpty()) {
+            // 1.6.0 hotfix #5: show target-side classification info so users can
+            // verify owner-aware aura routing (MCA spouse, etc.) for Tier-2/3
+            // entities.
+            source.sendSuccess(() -> Component.literal(
+                    "Not wrappable as performer — diagnosing as target only:"
+            ).withStyle(ChatFormatting.YELLOW), false);
+            // OwnerResolver: shows the spouse / owner relationship registered
+            // by mods like MCA.
+            java.util.Optional<java.util.UUID> ownerUuid =
+                    com.crims.effectiveinstruments.performer.OwnerResolver.ownerOf(living);
+            source.sendSuccess(() -> Component.literal(
+                    "Resolved owner: " + ownerUuid.map(java.util.UUID::toString).orElse("(none)")
+            ).withStyle(ChatFormatting.GRAY), false);
+            // EntityClassificationLoader: shows any JSON override.
+            com.crims.effectiveinstruments.data.ClassificationOverride override =
+                    com.crims.effectiveinstruments.data.EntityClassificationLoader.lookup(living.getType());
+            source.sendSuccess(() -> Component.literal(
+                    "JSON override: " + (override.hasCategory()
+                            ? override.category().name()
+                                + (override.requireTamed() ? " (requireTamed)" : "")
+                            : "(none)")
+            ).withStyle(ChatFormatting.GRAY), false);
+            // If the diagnoser is a player, classify the entity as it would be
+            // bucketed when that player performs a stationary aura.
+            if (source.getEntity() instanceof ServerPlayer sp) {
+                IAuraPerformer playerPerf =
+                        new com.crims.effectiveinstruments.performer.PlayerPerformer(
+                                sp, PerformerTier.STATIONARY);
+                com.crims.effectiveinstruments.aura.EntityCategory bucket =
+                        com.crims.effectiveinstruments.performer.TargetClassifier
+                                .classify(living, playerPerf, java.util.Set.of());
+                source.sendSuccess(() -> Component.literal(
+                        "As target of you: classified as " + bucket.name()
+                ).withStyle(ChatFormatting.GRAY), false);
+            }
+            return 1;
+        }
+        IAuraPerformer perf = wrappedStat.orElseGet(wrappedMob::get);
+        source.sendSuccess(() -> Component.literal(
+                "Tier: " + perf.tier()
+                        + " | uuid: " + living.getUUID()
+        ).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal(
+                "Owner: " + perf.ownerUuid().map(java.util.UUID::toString).orElse("(none)")
+        ).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal(
+                "Team: " + (perf.scoreboardTeam() != null ? perf.scoreboardTeam().getName() : "(none)")
+        ).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal(
+                "Instrument: " + (perf.instrumentStack().isEmpty()
+                        ? "(empty)" : perf.instrumentStack().getItem())
+        ).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal(
+                "Selected aura: " + perf.selectedAuraId().map(Object::toString).orElse("(none)")
+        ).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal(
+                "canPerformNow: " + perf.canPerformNow(level)
+        ).withStyle(ChatFormatting.GRAY), false);
+        return 1;
     }
 
     /**

@@ -69,6 +69,65 @@ public class EIServerConfig {
     public static final ForgeConfigSpec.IntValue DURABILITY_DEFAULT_MAX;
     public static final ForgeConfigSpec.IntValue DURABILITY_ANVIL_REPAIR_BONUS_PERCENT;
 
+    // 1.6.0: NPC performer framework master toggles. Empty config block emits
+    // no per-mod sections — those land in [npcs.<modid>] subsections (one per
+    // adapter shipping in Phases 2-5).
+    public static final ForgeConfigSpec.BooleanValue NPCS_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue NPCS_ALLOW_PERFORMERS;
+    public static final ForgeConfigSpec.BooleanValue NPCS_ALLOW_TARGETS;
+    public static final ForgeConfigSpec.IntValue NPCS_MAX_PERFORMERS_PER_CHUNK;
+    public static final ForgeConfigSpec.IntValue NPCS_MAX_PERFORMERS_PER_OWNER;
+    public static final ForgeConfigSpec.IntValue NPCS_MAX_PERFORMERS_PER_SERVER;
+    public static final ForgeConfigSpec.IntValue NPCS_PERFORMER_COOLDOWN_TICKS;
+    public static final ForgeConfigSpec.IntValue NPCS_PERFORMER_SCAN_INTERVAL_TICKS;
+    public static final ForgeConfigSpec.IntValue NPCS_OWNER_NEARBY_RADIUS;
+    public static final ForgeConfigSpec.DoubleValue NPCS_PERFORMER_AURA_RADIUS_MULTIPLIER;
+    public static final ForgeConfigSpec.BooleanValue NPCS_REQUIRE_OWNER_ONLINE;
+    public static final ForgeConfigSpec.BooleanValue NPCS_RESPECT_SCOREBOARD_TEAMS;
+    public static final ForgeConfigSpec.IntValue NPCS_MAX_TARGETS_PER_TICK_PER_PERFORMER;
+
+    // [npcs.recruits] — Phase 2.
+    public static final ForgeConfigSpec.BooleanValue NPCS_RECRUITS_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue NPCS_RECRUITS_ALLOW_PERFORMERS;
+    public static final ForgeConfigSpec.BooleanValue NPCS_RECRUITS_ALLOW_OFFENSIVE_AURAS;
+    public static final ForgeConfigSpec.BooleanValue NPCS_RECRUITS_RESPECT_FACTION;
+
+    // [npcs.guardvillagers] — Phase 3.
+    public static final ForgeConfigSpec.BooleanValue NPCS_GUARDVILLAGERS_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue NPCS_GUARDVILLAGERS_ALLOW_PERFORMERS;
+    public static final ForgeConfigSpec.IntValue NPCS_GUARDVILLAGERS_HERO_RADIUS;
+
+    // [npcs.easy_npc] — Phase 3b.
+    public static final ForgeConfigSpec.BooleanValue NPCS_EASY_NPC_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue NPCS_EASY_NPC_ALLOW_PERFORMERS;
+
+    // [npcs.doggytalents] — Phase 3b.
+    public static final ForgeConfigSpec.BooleanValue NPCS_DOGGYTALENTS_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue NPCS_DOGGYTALENTS_ALLOW_PERFORMERS;
+    public static final ForgeConfigSpec.BooleanValue NPCS_DOGGYTALENTS_REQUIRE_SITTING_OR_DOCILE;
+
+    // [npcs.irons_spellbooks] — Phase 3b.
+    public static final ForgeConfigSpec.BooleanValue NPCS_IRONS_SPELLBOOKS_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue NPCS_IRONS_SPELLBOOKS_ALLOW_PERFORMERS;
+    public static final ForgeConfigSpec.IntValue NPCS_IRONS_SPELLBOOKS_MIN_TIMER_REMAINING;
+
+    // [npcs.ars_nouveau] — Phase 3b (Starbuncle Tier 1, ownerless).
+    public static final ForgeConfigSpec.BooleanValue NPCS_ARS_NOUVEAU_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue NPCS_ARS_NOUVEAU_ALLOW_STARBUNCLE;
+    public static final ForgeConfigSpec.BooleanValue NPCS_ARS_NOUVEAU_ALLOW_FAMILIARS;
+
+    // [npcs.touhou_little_maid] — Phase 4.
+    public static final ForgeConfigSpec.BooleanValue NPCS_TOUHOU_LITTLE_MAID_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue NPCS_TOUHOU_LITTLE_MAID_ALLOW_PERFORMERS;
+    public static final ForgeConfigSpec.BooleanValue NPCS_TOUHOU_LITTLE_MAID_ALLOW_OFFENSIVE_AURAS;
+
+    // [npcs.mca] — Phase 4 (Tier 2, target-only).
+    public static final ForgeConfigSpec.BooleanValue NPCS_MCA_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue NPCS_MCA_RESPECT_RELATIONSHIPS;
+
+    // [npcs.pehkui] — Phase 5 library hook.
+    public static final ForgeConfigSpec.BooleanValue NPCS_PEHKUI_RESPECT_SCALE_FOR_RADIUS;
+
     static {
         ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
 
@@ -276,6 +335,134 @@ public class EIServerConfig {
                 .comment("Anvil 'combine two damaged copies' bonus, as a percentage of max durability. Vanilla tools use 12%.")
                 .defineInRange("anvilCombineBonusPercent", 12, 0, 100);
         builder.pop();
+
+        // 1.6.0: NPC performer framework. Master toggles + per-mod sub-blocks.
+        builder.comment(
+                        "NPC performer framework (1.6.0+). Lets supported NPC mods (Recruits,",
+                        "Guard Villagers, Touhou Maids, Iron's Spells summons, etc.) drive the aura",
+                        "pipeline. Each adapter is gated by ModList.isLoaded(<modid>) — if you don't",
+                        "have the target mod installed the section is inert.")
+                .push("npcs");
+        NPCS_ENABLED = builder
+                .comment("Master switch for the entire NPC framework. Set false to disable all NPC performers + target classification.")
+                .define("enabled", true);
+        NPCS_ALLOW_PERFORMERS = builder
+                .comment("Allow NPCs to act as aura sources. Set false to keep NPCs as targets only.")
+                .define("allowPerformers", true);
+        NPCS_ALLOW_TARGETS = builder
+                .comment("Allow NPCs to receive aura effects. Set false to make NPCs invisible to the aura system entirely.")
+                .define("allowTargets", true);
+        NPCS_MAX_PERFORMERS_PER_CHUNK = builder
+                .comment("Performance gate: max simultaneous NPC performers within any single chunk.")
+                .defineInRange("maxPerformersPerChunk", 4, 1, 64);
+        NPCS_MAX_PERFORMERS_PER_OWNER = builder
+                .comment("Performance gate: max simultaneous NPC performers owned by any single player.")
+                .defineInRange("maxPerformersPerOwner", 8, 1, 256);
+        NPCS_MAX_PERFORMERS_PER_SERVER = builder
+                .comment("Performance gate: hard upper bound on simultaneous NPC performers server-wide.")
+                .defineInRange("maxPerformersPerServer", 256, 1, 4096);
+        NPCS_PERFORMER_COOLDOWN_TICKS = builder
+                .comment("Default cooldown between NPC performances. Per-mod sub-blocks may override.")
+                .defineInRange("performerCooldownTicks", 60, 1, 6000);
+        NPCS_PERFORMER_SCAN_INTERVAL_TICKS = builder
+                .comment("How often (in ticks) the NPC framework re-evaluates eligibility for active performers.")
+                .defineInRange("performerScanIntervalTicks", 20, 1, 200);
+        NPCS_OWNER_NEARBY_RADIUS = builder
+                .comment("Distance in blocks within which an NPC's owner must be present for the NPC to be considered 'supervised'.")
+                .defineInRange("ownerNearbyRadius", 32, 4, 128);
+        NPCS_PERFORMER_AURA_RADIUS_MULTIPLIER = builder
+                .comment("Multiplier applied to the aura radius when an NPC (not a player) is the performer.")
+                .defineInRange("performerAuraRadiusMultiplier", 0.75, 0.1, 4.0);
+        NPCS_REQUIRE_OWNER_ONLINE = builder
+                .comment("If true, NPCs only perform when their owner UUID resolves to an online player.")
+                .define("requireOwnerOnline", true);
+        NPCS_RESPECT_SCOREBOARD_TEAMS = builder
+                .comment("If true, scoreboard team membership is consulted as part of friend/foe classification for NPC performers and targets.")
+                .define("respectScoreboardTeams", true);
+        NPCS_MAX_TARGETS_PER_TICK_PER_PERFORMER = builder
+                .comment("Max aura targets any single NPC performer can affect per tick. Bounds armies-of-NPCs scenarios.")
+                .defineInRange("maxTargetsPerTickPerPerformer", 16, 1, 256);
+
+        builder.comment("Recruits (talhanation/recruits) — Phase 2 of 1.6.0 NPC compat.").push("recruits");
+        NPCS_RECRUITS_ENABLED = builder
+                .comment("Master switch for the Recruits adapter. Inert when Recruits is absent at runtime.")
+                .define("enabled", true);
+        NPCS_RECRUITS_ALLOW_PERFORMERS = builder
+                .comment("Allow recruits to perform auras when idle (no target, not fleeing/resting/in-raid).")
+                .define("allowPerformers", true);
+        NPCS_RECRUITS_ALLOW_OFFENSIVE_AURAS = builder
+                .comment("Allow recruits to perform negative-polarity auras. Set false for buff-only recruit musicians.")
+                .define("allowOffensiveAuras", true);
+        NPCS_RECRUITS_RESPECT_FACTION = builder
+                .comment("Consult Recruits' RecruitsDiplomacyManager for ALLY/ENEMY classification of other recruits.")
+                .define("respectRecruitsFaction", true);
+        builder.pop(); // npcs.recruits
+
+        builder.comment("Guard Villagers (tallestegg/guardvillagers) — Phase 3.").push("guardvillagers");
+        NPCS_GUARDVILLAGERS_ENABLED = builder
+                .comment("Master switch for the Guard Villagers adapter.")
+                .define("enabled", true);
+        NPCS_GUARDVILLAGERS_ALLOW_PERFORMERS = builder
+                .comment("Allow guards to perform auras while not in combat.")
+                .define("allowPerformers", true);
+        NPCS_GUARDVILLAGERS_HERO_RADIUS = builder
+                .comment("Distance in blocks within which a HERO_OF_THE_VILLAGE player counts as an implicit guard owner.")
+                .defineInRange("heroPlayerRadius", 24, 4, 64);
+        builder.pop(); // npcs.guardvillagers
+
+        builder.comment("Easy NPC (MarkusBordihn/BOs-Easy-NPC) — Phase 3.").push("easy_npc");
+        NPCS_EASY_NPC_ENABLED = builder.define("enabled", true);
+        NPCS_EASY_NPC_ALLOW_PERFORMERS = builder.define("allowPerformers", true);
+        builder.pop(); // npcs.easy_npc
+
+        builder.comment("Doggy Talents Next (DashieDev/DoggyTalentsNext) — Phase 3.").push("doggytalents");
+        NPCS_DOGGYTALENTS_ENABLED = builder.define("enabled", true);
+        NPCS_DOGGYTALENTS_ALLOW_PERFORMERS = builder.define("allowPerformers", true);
+        NPCS_DOGGYTALENTS_REQUIRE_SITTING_OR_DOCILE = builder
+                .comment("If true, dogs only play when sitting or in docile mode.")
+                .define("requireSittingOrDocile", true);
+        builder.pop(); // npcs.doggytalents
+
+        builder.comment("Iron's Spells 'n Spellbooks (iron431/irons-spells-n-spellbooks) — Phase 3.").push("irons_spellbooks");
+        NPCS_IRONS_SPELLBOOKS_ENABLED = builder.define("enabled", true);
+        NPCS_IRONS_SPELLBOOKS_ALLOW_PERFORMERS = builder.define("allowPerformers", true);
+        NPCS_IRONS_SPELLBOOKS_MIN_TIMER_REMAINING = builder
+                .comment("Minimum ticks of remaining summon-timer effect required for a summon to start playing.")
+                .defineInRange("minSummonTimerRemaining", 60, 0, 6000);
+        builder.pop(); // npcs.irons_spellbooks
+
+        builder.comment("Ars Nouveau (baileyholl/Ars-Nouveau) — Phase 3 (Starbuncle Tier 1; familiars Tier 2 deferred).").push("ars_nouveau");
+        NPCS_ARS_NOUVEAU_ENABLED = builder.define("enabled", true);
+        NPCS_ARS_NOUVEAU_ALLOW_STARBUNCLE = builder
+                .comment("Allow Starbuncles to perform auras. Ownerless — plays for any nearby targets.")
+                .define("allowStarbuncle", true);
+        NPCS_ARS_NOUVEAU_ALLOW_FAMILIARS = builder
+                .comment("Reserved for Phase 5 — promote Ars Nouveau familiars to first-class targets. No effect today.")
+                .define("allowFamiliars", false);
+        builder.pop(); // npcs.ars_nouveau
+
+        builder.comment("Touhou Little Maid (TartaricAcid/TouhouLittleMaid) — Phase 4.").push("touhou_little_maid");
+        NPCS_TOUHOU_LITTLE_MAID_ENABLED = builder.define("enabled", true);
+        NPCS_TOUHOU_LITTLE_MAID_ALLOW_PERFORMERS = builder.define("allowPerformers", true);
+        NPCS_TOUHOU_LITTLE_MAID_ALLOW_OFFENSIVE_AURAS = builder
+                .comment("Allow maids to perform negative-polarity auras. Default false — maids are buff-only by mod theme.")
+                .define("allowOffensiveAuras", false);
+        builder.pop(); // npcs.touhou_little_maid
+
+        builder.comment("Minecraft Comes Alive (Luke100000/minecraft-comes-alive) — Phase 4 (Tier 2 target-only).").push("mca");
+        NPCS_MCA_ENABLED = builder.define("enabled", true);
+        NPCS_MCA_RESPECT_RELATIONSHIPS = builder
+                .comment("Honor MCA marriage/relationship state — spouse is treated as the villager's owner for aura classification.")
+                .define("respectRelationships", true);
+        builder.pop(); // npcs.mca
+
+        builder.comment("Pehkui (Virtuoel/Pehkui) — Phase 5 library hook for non-player aura-radius scaling.").push("pehkui");
+        NPCS_PEHKUI_RESPECT_SCALE_FOR_RADIUS = builder
+                .comment("Multiply non-player performer aura radius by their Pehkui BASE scale. Player path is never scaled.")
+                .define("respectScaleForRadius", true);
+        builder.pop(); // npcs.pehkui
+
+        builder.pop(); // npcs
 
         SPEC = builder.build();
     }

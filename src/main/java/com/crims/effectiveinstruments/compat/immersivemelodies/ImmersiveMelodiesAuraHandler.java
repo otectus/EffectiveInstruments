@@ -8,10 +8,15 @@ import com.crims.effectiveinstruments.aura.TargetingProfile;
 import com.crims.effectiveinstruments.aura.TargetingProfiles;
 import com.crims.effectiveinstruments.config.EIServerConfig;
 import com.crims.effectiveinstruments.durability.InstrumentDurability;
+import com.crims.effectiveinstruments.performer.IAuraPerformer;
+import com.crims.effectiveinstruments.performer.PerformerRegistry;
+import com.crims.effectiveinstruments.performer.PerformerTier;
+import com.crims.effectiveinstruments.performer.PlayerPerformer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffect;
+import net.minecraft.world.entity.LivingEntity;
 
 import javax.annotation.Nullable;
 import java.util.HashMap;
@@ -108,6 +113,28 @@ public final class ImmersiveMelodiesAuraHandler {
     private static final Set<UUID> ACTIVE_MOBILE_MUSICIANS = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /**
+     * 1.6.0 (per plan §0 / spec §15 open-question resolution): Tier-1 NPC
+     * adapters operating in {@link PerformerTier#MOBILE} register their host
+     * entity UUID here when their goal/behavior enters PLAYING_*. The tick
+     * loop walks this set in parallel with {@link #ACTIVE_MOBILE_MUSICIANS}.
+     *
+     * <p>NPC mobile activation flows entirely through the adapter — IM's
+     * {@code playing=true} NBT flag is never written, so IM's own sound
+     * pipeline never sees NPC performers. The adapter's goal handles the
+     * note-cue (swing + SoundEvent) directly.
+     */
+    private static final Set<UUID> ACTIVE_MOBILE_NPCS = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** Adapter API: register/unregister an NPC for the mobile pulse loop. */
+    public static void registerActiveMobileNpc(UUID entityId) {
+        ACTIVE_MOBILE_NPCS.add(entityId);
+    }
+    public static void unregisterActiveMobileNpc(UUID entityId) {
+        ACTIVE_MOBILE_NPCS.remove(entityId);
+        STATES.remove(entityId);
+    }
+
+    /**
      * 1.4.9 (RECS §2.6): how often to do a full discovery scan for players
      * with NBT-marked playing stacks who aren't in {@link #ACTIVE_MOBILE_MUSICIANS}
      * yet (e.g. they triggered IM autoplay without ever opening an IM screen
@@ -157,6 +184,25 @@ public final class ImmersiveMelodiesAuraHandler {
                     ACTIVE_MOBILE_MUSICIANS.add(p.getUUID());
                     tickPlayer(level, p, gameTime);
                 }
+            }
+        }
+
+        // 1.6.0: Tier-1 NPC mobile performers (registered via
+        // registerActiveMobileNpc by their adapter). Walks a separate set
+        // because NPCs are not resolved through the player list.
+        if (!ACTIVE_MOBILE_NPCS.isEmpty()) {
+            for (UUID uuid : List.copyOf(ACTIVE_MOBILE_NPCS)) {
+                net.minecraft.world.entity.Entity e = level.getEntity(uuid);
+                if (!(e instanceof LivingEntity living) || !living.isAlive()) {
+                    unregisterActiveMobileNpc(uuid);
+                    continue;
+                }
+                IAuraPerformer perf = PerformerRegistry.wrap(living, PerformerTier.MOBILE).orElse(null);
+                if (perf == null) {
+                    unregisterActiveMobileNpc(uuid);
+                    continue;
+                }
+                tickPerformer(level, perf, gameTime);
             }
         }
     }
@@ -239,8 +285,11 @@ public final class ImmersiveMelodiesAuraHandler {
         TargetingProfile profile = aura.isOffensive()
                 ? TargetingProfiles.mobileOffensive()
                 : TargetingProfiles.mobilePositive();
+        // 1.6.0: route through the performer-aware overload. Wrapping the
+        // player here is the boundary call — byte-identical for the player
+        // path because PlayerPerformer.entity() is the same ServerPlayer.
         AuraApplicator.apply(
-                player,
+                new PlayerPerformer(player, PerformerTier.MOBILE),
                 aura,
                 radius,
                 duration,
@@ -269,6 +318,106 @@ public final class ImmersiveMelodiesAuraHandler {
                 clearImmediate(level, state);
             }
         }
+    }
+
+    /**
+     * 1.6.0: NPC mobile pulse handler. Mirrors {@link #tickPlayer} but with no
+     * IM autoplay NBT path and no chat-throttled messages — NPC adapter goals
+     * own those concerns. State map is shared (keyed by entity UUID) so the
+     * existing prune + cleanup helpers work unchanged.
+     *
+     * <p>The performer's {@link IAuraPerformer#instrumentStack()} drives the
+     * broken-state gate; the per-tier mobile aura lookup goes through the
+     * existing {@link MobileInstrumentAuraMapping}. Durability damage is
+     * charged on every pulse the performer is actually playing.
+     */
+    private static void tickPerformer(ServerLevel level, IAuraPerformer perf, long gameTime) {
+        UUID id = perf.entity().getUUID();
+        MobileAuraState state = STATES.computeIfAbsent(id, k -> new MobileAuraState());
+
+        if (gameTime - state.lastPruneTick >= 1200) {
+            state.lastPruneTick = gameTime;
+            state.affectedTargets.keySet().removeIf(eid -> level.getEntity(eid) == null);
+        }
+
+        net.minecraft.world.item.ItemStack heldStack = perf.instrumentStack();
+        if (heldStack.isEmpty()) {
+            handleIdleGeneric(level, state, gameTime, id);
+            return;
+        }
+        ResourceLocation activeInstrumentId =
+                net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(heldStack.getItem());
+        if (activeInstrumentId == null) {
+            handleIdleGeneric(level, state, gameTime, id);
+            return;
+        }
+        if (InstrumentDurability.isBroken(heldStack)) {
+            handleIdleGeneric(level, state, gameTime, id);
+            return;
+        }
+        if (!perf.canPerformNow(level)) {
+            handleIdleGeneric(level, state, gameTime, id);
+            return;
+        }
+
+        AuraPreset aura = MobileInstrumentAuraMapping.resolveFor(
+                level.getServer(), id, activeInstrumentId);
+        if (aura == null) {
+            handleIdleGeneric(level, state, gameTime, id);
+            return;
+        }
+
+        if (state.activeAura != null && !state.activeAura.id().equals(aura.id())) {
+            AuraApplicator.clear(
+                    level,
+                    state.activeAura,
+                    maxExpectedDurationFor(state.activeAura),
+                    state.affectedTargets
+            );
+        }
+
+        if (aura.isOffensive() && !EIServerConfig.OFFENSIVE_AURAS_ENABLED.get()) {
+            handleIdleGeneric(level, state, gameTime, id);
+            return;
+        }
+
+        state.activeAura = aura;
+        state.instrumentId = activeInstrumentId;
+        state.lastActiveTick = gameTime;
+
+        int radius = resolveMobileRadius(aura);
+        int duration = aura.getEffectiveDuration();
+        TargetingProfile profile = aura.isOffensive()
+                ? TargetingProfiles.mobileOffensive()
+                : TargetingProfiles.mobilePositive();
+        AuraApplicator.apply(perf, aura, radius, duration, profile, state.affectedTargets);
+        AuraManager.spawnAuraNotes(perf.entity(), aura, radius);
+
+        if (EIServerConfig.DURABILITY_ENABLED.get()) {
+            int cost = EIServerConfig.DURABILITY_COST_PER_MOBILE_PULSE.get();
+            if (aura.isOffensive()) cost *= EIServerConfig.OFFENSIVE_DURABILITY_COST_MULT.get();
+            InstrumentDurability.damage(heldStack, cost, null);
+        }
+    }
+
+    /**
+     * Generic idle handler shared by NPC pulse — mirrors {@link #handleIdle}
+     * but drops player-specific {@code ACTIVE_MOBILE_MUSICIANS} membership.
+     * For NPCs membership lives in {@code ACTIVE_MOBILE_NPCS} and is managed
+     * by the adapter goal explicitly.
+     */
+    private static void handleIdleGeneric(ServerLevel level, MobileAuraState state, long gameTime, UUID id) {
+        if (state.activeAura == null) return;
+        int linger = EIServerConfig.MOBILE_LINGER_TICKS.get();
+        if (gameTime - state.lastActiveTick < linger) return;
+        AuraApplicator.clear(
+                level,
+                state.activeAura,
+                maxExpectedDurationFor(state.activeAura),
+                state.affectedTargets
+        );
+        state.activeAura = null;
+        state.instrumentId = null;
     }
 
     /**

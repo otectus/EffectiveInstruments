@@ -1,0 +1,13 @@
+# 1.6.0 ServiceLoader manifest for PerformerAdapterProvider implementations.
+# Each line is the FQN of a class implementing PerformerRegistry.PerformerAdapterProvider.
+# Adapters self-gate via ModList.isLoaded; dormant providers are discovered but
+# silently ignored when their target mod isn't installed.
+com.crims.effectiveinstruments.compat.recruits.RecruitPerformerAdapter
+com.crims.effectiveinstruments.compat.guardvillagers.GuardPerformerAdapter
+com.crims.effectiveinstruments.compat.easy_npc.EasyNpcPerformerAdapter
+com.crims.effectiveinstruments.compat.doggytalents.DogPerformerAdapter
+com.crims.effectiveinstruments.compat.irons_spellbooks.SummonPerformerAdapter
+com.crims.effectiveinstruments.compat.ars_nouveau.StarbunclePerformerAdapter
+com.crims.effectiveinstruments.compat.touhou_little_maid.MaidPerformerAdapter
+com.crims.effectiveinstruments.compat.mca.MCAPerformerAdapter
+com.crims.effectiveinstruments.compat.pehkui.PehkuiPerformerAdapter

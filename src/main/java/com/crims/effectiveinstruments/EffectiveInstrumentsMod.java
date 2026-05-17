@@ -9,6 +9,7 @@ import com.crims.effectiveinstruments.config.EIServerConfig;
 import com.crims.effectiveinstruments.durability.InstrumentDurability;
 import com.crims.effectiveinstruments.network.EIPacketHandler;
 import com.crims.effectiveinstruments.particle.EIParticleTypes;
+import com.crims.effectiveinstruments.performer.PerformerRegistry;
 import com.mojang.logging.LogUtils;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
@@ -72,6 +73,12 @@ public class EffectiveInstrumentsMod {
                 LOGGER.warn("No supported instrument backend detected. Install Genshin Instruments " +
                         "or Immersive Melodies to activate Effective Instruments gameplay features.");
             }
+            // 1.6.0: discover per-mod NPC performer adapters via ServiceLoader.
+            // Adapter providers ship as META-INF/services entries; each one
+            // registers its OwnerProvider/FactionProvider + Forge bus listeners
+            // during bootstrap. Phase 0 ships zero adapters; later phases add 22.
+            PerformerRegistry.discover();
+            PerformerRegistry.bootstrapAll(FMLJavaModLoadingContext.get().getModEventBus());
         });
     }
 
